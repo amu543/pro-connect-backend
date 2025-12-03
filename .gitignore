@@ -1,1 +1,13 @@
+# Node modules
+node_modules/
+
+# Environment variables
 .env
+
+# Google service account key
+google-key.json
+
+# Uploads
+uploads/
+# Ignore API documentation
+API_DOCUMENTATION.md
