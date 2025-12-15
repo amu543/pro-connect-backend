@@ -11,9 +11,32 @@ const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
 const mammoth = require("mammoth");
 const ServiceProvider = require("../models/ServiceProvider");
 const auth = require("../middleware/auth");
+const nodemailer = require("nodemailer");
+require("dotenv").config();
 const { performOCR } = require("../ocr");
-const { generateOTP, sendEmailOTP } = require("../otp");
 
+// OTP HELPERS
+// ===================================================
+function generateOTP() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+async function sendEmailOTP(email, otp) {
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: process.env.EMAIL_SERVICE_USER,
+      pass: process.env.EMAIL_SERVICE_PASS,
+    },
+  });
+
+  await transporter.sendMail({
+    from: process.env.EMAIL_SERVICE_USER,
+    to: email,
+    subject: "Pro Connect – Email Verification",
+    text: `Your OTP is ${otp}. Valid for 5 minutes.`,
+  });
+}
 // Helper: Ensure folder exists
 // ---------------------------
 const ensureFolderExists = folderPath => {
@@ -196,6 +219,14 @@ router.post(
 
       if (password !== confirmPassword)
         return res.status(400).json({ error: "sp: Passwords do not match" });
+      // ✅ Minimum 8 characters password
+          // Strong password validation (optional but recommended)
+const strongPasswordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
+if (!strongPasswordRegex.test(password)) {
+  return res.status(400).json({ 
+    error: "sp: Password must be at least 8 characters and include uppercase, lowercase, number, and special character" 
+  });
+}
 
       const phoneRegex = /^\+977\d{10}$/;
       if (!phoneRegex.test(phone))
@@ -330,6 +361,7 @@ const robustWardMatch = (wardNo, text) => {
         cvVerificationDetails,
         otp,
         otpExpires,
+          isVerified: false,
       });
 
       await sp.save();
@@ -343,7 +375,39 @@ const robustWardMatch = (wardNo, text) => {
   }
 );
 
+// VERIFY OTP (ONE TIME)
+// ===================================================
+router.post("/sp-verify-otp", async (req, res) => {
+  try {
+    const { Email, OTP } = req.body;
 
+    if (!Email || !OTP)
+      return res.status(400).json({ error: "Email and OTP required" });
+
+    const user = await ServiceProvider.findOne({ email: Email });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    if (user.isVerified)
+      return res.status(400).json({ error: "Account already verified" });
+
+    if (user.otp !== OTP)
+      return res.status(400).json({ error: "Invalid OTP" });
+
+    if (user.otpExpires < new Date())
+      return res.status(400).json({ error: "OTP expired" });
+
+    user.otp = null;
+    user.otpExpires = null;
+    user.isVerified = true;
+    await user.save();
+
+    res.json({ message: "OTP verified successfully" });
+
+  } catch (err) {
+    console.error("verify-otp error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
 
 // ---------------------------
 // Login
@@ -355,7 +419,8 @@ router.post("/sp-login", async (req, res) => {
 
     const user = await ServiceProvider.findOne({ email: Email });
     if (!user) return res.status(400).json({ error: "sp: Email not registered" });
-
+     if (!user.isVerified)
+      return res.status(403).json({ error: "Email not verified" });
     const isMatch = await bcrypt.compare(Password, user.password);
     if (!isMatch) return res.status(400).json({ error: "sp: Invalid password" });
 
@@ -391,6 +456,8 @@ router.post("/sp-resend-otp", async (req, res) => {
     const { Email } = req.body;
     const user = await ServiceProvider.findOne({ email: Email });
     if (!user) return res.status(400).json({ error: "sp: Email not registered" });
+     if (user.isVerified)
+      return res.status(400).json({ error: "Account already verified" });
 
     const otp = generateOTP();
     user.otp = otp;

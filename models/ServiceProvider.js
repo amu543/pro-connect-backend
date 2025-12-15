@@ -18,11 +18,14 @@ const ServiceProviderSchema = new mongoose.Schema({
   idDocument: { type: String, required: true },
   cvDocument: { type: String, required: true },
   Portfolio: { type: [String] }, // multiple portfolio files
-  ExtraCertificate: { type: [String] }, // multiple extra certificates
+  "Extra Certificate": { type: [String] }, // multiple extra certificates
   idTextOCR: { type: String }, // OCR text from ID
-   faceMatchPercent: { type: Number },
   cvVerified: { type: Boolean, default: false },
   cvVerificationDetails: { type: [String], default: [] },
+  isVerified: {
+  type: Boolean,
+  default: false,
+},
   otp: { type: String },
   otpExpires: { type: Date },
   createdAt: { type: Date, default: Date.now },
