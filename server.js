@@ -1,13 +1,21 @@
 // server.js
 const express = require("express");
+const http = require("http");
+const { Server } = require("socket.io");
 const cors = require("cors");
 const path = require("path");
 require("dotenv").config();
 
 const connectDB = require("./db");
 const serviceProviderRoutes = require("./routes/serviceProvider");
-
+const servicePageRoutes = require("./routes/spservicePage");
+const ratingRoutes = require("./routes/sprating");
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: { origin: "*" }, // allow all origins (or restrict to your frontend)
+});
+
 
 // ---------------------------
 // Connect to MongoDB
@@ -20,12 +28,14 @@ connectDB();
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
+// Make io accessible in routes
+app.set("io", io);
 // ---------------------------
 // Routes
 // ---------------------------
 app.use("/api/service-providers", serviceProviderRoutes);
-
+app.use("/api/sp-ratings", ratingRoutes);
+app.use("/api/sp-service-page", servicePageRoutes);
 // ---------------------------
 // Serve uploads folder statically
 // ---------------------------
@@ -49,8 +59,24 @@ app.use((req, res) => {
   res.status(404).json({ error: "Endpoint not found" });
 });
 
+// Socket.IO connection
+io.on("connection", (socket) => {
+  console.log("SP connected: " + socket.id);
+
+  // SP joins a room using their SP ID after login
+  socket.on("joinRoom", (spId) => {
+    socket.join(spId);
+    console.log(`SP ${spId} joined their notification room`);
+  });
+  socket.on("disconnect", () => {
+    console.log("SP disconnected:", socket.id);
+  });
+});
+
+
+
 // ---------------------------
 // Start server
 // ---------------------------
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 sp: Server running on http://localhost:${PORT}`));
+server.listen(PORT, () => console.log(`🚀 sp: Server running on http://localhost:${PORT}`));

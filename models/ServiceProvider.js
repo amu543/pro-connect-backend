@@ -1,5 +1,5 @@
+//models/ServiceProvider.js
 const mongoose = require("mongoose");
-
 const ServiceProviderSchema = new mongoose.Schema({
   "Full Name": { type: String, required: true },
   email: { type: String, required: true, unique: true },
@@ -9,7 +9,7 @@ const ServiceProviderSchema = new mongoose.Schema({
   Service: { type: String, required: true },
   "Year of Experience": { type: String, required: true },
   "Skills / Expertise": { type: [String], required: true },
-  "Short Bio (optional)": { type: String },
+  "Short Bio": { type: String },
   Province: { type: String, required: true },
   District: { type: String, required: true },
   Municipality: { type: String, required: true },
@@ -21,15 +21,33 @@ const ServiceProviderSchema = new mongoose.Schema({
   "Extra Certificate": { type: [String] }, // multiple extra certificates
   idTextOCR: { type: String }, // OCR text from ID
   cvVerified: { type: Boolean, default: false },
-  cvVerificationDetails: { type: [String], default: [] },
+   cvVerificationDetails: {
+    nameMatched: { type: Boolean, default: false },
+    serviceMatched: { type: Boolean, default: false },
+    skillsMatched: { type: [String], default: [] },
+    experienceMatched: { type: Boolean, default: false },
+    extractedYears: { type: Number, default: null },
+    error: { type: String, default: null }
+  },
   isVerified: {
   type: Boolean,
   default: false,
-},
+}, 
+   ratings: { avgRating: { type: Number, default: 0 }, totalRatings: { type: Number, default: 0 } },
+  homeLocation: {
+    province: String,
+    district: String,
+    municipality: String,
+    ward: String
+  },
+  currentLocation: {
+    type: { type: String, enum: ["Point"], default: "Point" },
+    coordinates: { type: [Number], default: [0, 0] }
+  },
   otp: { type: String },
   otpExpires: { type: Date },
   createdAt: { type: Date, default: Date.now },
  
 }, { timestamps: true });
-
+   ServiceProviderSchema.index({ currentLocation: "2dsphere" });
 module.exports = mongoose.model("ServiceProvider", ServiceProviderSchema);

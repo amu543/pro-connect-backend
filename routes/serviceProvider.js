@@ -10,7 +10,9 @@ const Tesseract = require("tesseract.js");
 const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
 const mammoth = require("mammoth");
 const ServiceProvider = require("../models/ServiceProvider");
-const auth = require("../middleware/auth");
+const ServiceRequest = require("../models/spServiceRequest");
+const Rating = require("../models/sprating");
+const spAuth = require("../middleware/spauth");
 const nodemailer = require("nodemailer");
 require("dotenv").config();
 const { performOCR } = require("../ocr");
@@ -56,7 +58,7 @@ const fileFilter = (req, file, cb) => {
     "Upload ID": ["image/jpeg", "image/png", "image/jpg"],
     "Upload CV": ["application/pdf"],
     Portfolio: ["image/jpeg", "image/png", "image/jpg"],
-    ExtraCertificate: ["image/jpeg", "image/png", "image/jpg"],
+    "Extra Certificate": ["image/jpeg", "image/png", "image/jpg"],
   };
   if (!allowed[file.fieldname]) return cb(new Error("sp: Unknown file field"), false);
   if (!allowed[file.fieldname].includes(file.mimetype))
@@ -65,6 +67,141 @@ const fileFilter = (req, file, cb) => {
 };
 const upload = multer({ storage, fileFilter, limits: { fileSize: 5 * 1024 * 1024 } });
 
+
+// Update provider rating after customer submits
+async function updateProviderRating(providerId) {
+  console.log("sp: Updating ratings for provider", providerId);
+  const result = await Rating.aggregate([
+    { $match: { serviceProviderId: providerId } },
+    { $group: { _id: "$serviceProviderId", avgRating: { $avg: "$rating" }, totalRatings: { $sum: 1 } } }
+  ]);
+
+  if (result.length > 0) {
+    await ServiceProvider.findByIdAndUpdate(providerId, {
+      ratings: {
+        avgRating: parseFloat(result[0].avgRating.toFixed(1)),
+        totalRatings: result[0].totalRatings
+      }
+    });
+    console.log("sp: Ratings updated", result[0]);
+  } else {
+    await ServiceProvider.findByIdAndUpdate(providerId, {
+      ratings: { avgRating: 0, totalRatings: 0 }
+    });
+    console.log("sp: Ratings reset to 0");
+  }
+}
+// Notify SPs about new request (called by customer backend)
+router.post("/notify", async (req, res) => {
+  try {
+    const io = req.app.get("io");
+    const { spIds, request } = req.body;
+
+    if (!spIds || !request) {
+      return res.status(400).json({ error: "spIds and request required" });
+    }
+
+    spIds.forEach((spId) => {
+      io.to(spId).emit("newRequest", {
+        requestId: request.id,
+        customerLocation: request.location,
+        distance: request.distance || null, // optional if calculated by customer backend
+      });
+    });
+
+    res.json({ message: "Notifications sent to SPs" });
+  } catch (err) {
+    console.error("SP notify error:", err);
+    res.status(500).json({ error: "Server error", details: err.message });
+  }
+});
+
+// ---------------------------
+// Get incoming requests for SP
+// ---------------------------
+router.get("/sp-requests", spAuth, async (req, res) => {
+  try {
+    console.log("sp: Fetching incoming service requests for", req.user.id);
+    const requests = await ServiceRequest.find({ serviceProviderId: req.user.id, status: 'pending' })
+      .populate('customerId', 'name phone')
+      .sort({ createdAt: -1 });
+
+    console.log("sp: Incoming requests fetched:", requests.length);
+    res.json(requests);
+  } catch (err) {
+    console.error("sp: Error fetching requests:", err);
+    res.status(500).json({ error: "Server error", details: err.message });
+  }
+});
+
+// ---------------------------
+// Accept a request
+// ---------------------------
+router.post("/sp-request-accept/:requestId", spAuth, async (req, res) => {
+  try {
+    const { requestId } = req.params;
+    console.log("sp: Accepting request", requestId);
+
+    const request = await ServiceRequest.findOne({ _id: requestId, serviceProviderId: req.user.id });
+    if (!request) return res.status(404).json({ error: "Request not found" });
+
+    request.status = "accepted";
+    await request.save();
+    console.log("sp: Request accepted", requestId);
+
+    res.json({ message: "Request accepted", request });
+  } catch (err) {
+    console.error("sp: Error accepting request:", err);
+    res.status(500).json({ error: "Server error", details: err.message });
+  }
+});
+
+// ---------------------------
+// Reject a request
+// ---------------------------
+router.post("/sp-request-reject/:requestId", spAuth, async (req, res) => {
+  try {
+    const { requestId } = req.params;
+    console.log("sp: Rejecting request", requestId);
+
+    const request = await ServiceRequest.findOne({ _id: requestId, serviceProviderId: req.user.id });
+    if (!request) return res.status(404).json({ error: "Request not found" });
+
+    request.status = "rejected";
+    await request.save();
+    console.log("sp: Request rejected", requestId);
+
+    res.json({ message: "Request rejected", request });
+  } catch (err) {
+    console.error("sp: Error rejecting request:", err);
+    res.status(500).json({ error: "Server error", details: err.message });
+  }
+});
+
+// ---------------------------
+// Mark request as completed
+// ---------------------------
+router.post("/sp-request-complete/:requestId", spAuth, async (req, res) => {
+  try {
+    const { requestId } = req.params;
+    console.log("sp: Completing request", requestId);
+
+    const request = await ServiceRequest.findOne({ _id: requestId, serviceProviderId: req.user.id });
+    if (!request) return res.status(404).json({ error: "Request not found" });
+
+    request.status = "completed";
+    await request.save();
+    console.log("sp: Request completed", requestId);
+
+    // Optionally, recalc ratings if customer already rated
+    await updateProviderRating(req.user.id);
+
+    res.json({ message: "Request marked as completed", request });
+  } catch (err) {
+    console.error("sp: Error completing request:", err);
+    res.status(500).json({ error: "Server error", details: err.message });
+  }
+});
 // ---------------------------
 // Ping
 // ---------------------------
@@ -77,7 +214,12 @@ router.get("/sp-ping", (req, res) => {
 async function verifyCV(cvPath, fullName, service, skills, yearsOfExperience) {
   let cvText = "";
   let cvVerified = true;
-  const cvVerificationDetails = [];
+  const cvVerificationDetails = {
+    nameMatched: false,
+    serviceMatched: false,
+    skillsMatched: [],
+    experienceMatched: false,
+    extractedYears: null};
 
     const ext = path.extname(cvPath).toLowerCase();
      try{
@@ -106,25 +248,50 @@ async function verifyCV(cvPath, fullName, service, skills, yearsOfExperience) {
       cvText = result.value.toLowerCase();
 
     } else {
-      cvVerificationDetails.push("Unsupported CV format");
+      cvVerificationDetails.error = "Unsupported CV format";
       cvVerified = false;
     }
 
     // Case-insensitive checks
-    if (!cvText.includes(fullName.toLowerCase())) { cvVerificationDetails.push("Full Name missing"); cvVerified = false; }
-    if (!cvText.includes(service.toLowerCase())) { cvVerificationDetails.push("Service missing"); cvVerified = false; }
-    skills.forEach(skill => { if (!cvText.includes(skill.toLowerCase())) cvVerificationDetails.push(`${skill} missing`); });
-   const experienceStr = String(yearsOfExperience).trim().toLowerCase();
-if (!cvText.includes(experienceStr)) {
-  cvVerificationDetails.push("Experience missing");
+    // Name check
+if (cvText.includes(fullName.toLowerCase())) {
+  cvVerificationDetails.nameMatched = true;
+} else {
+  cvVerified = false;
+}
+
+// Service check
+if (cvText.includes(service.toLowerCase())) {
+  cvVerificationDetails.serviceMatched = true;
+} else {
+  cvVerified = false;
+}
+
+// Skills check
+skills.forEach(skill => {
+  if (cvText.includes(skill.toLowerCase())) {
+    cvVerificationDetails.skillsMatched.push(skill);
+  }
+});
+if (cvVerificationDetails.skillsMatched.length === 0) {
+  cvVerified = false;
+}
+
+// Experience check
+const experienceStr = String(yearsOfExperience).toLowerCase();
+if (cvText.includes(experienceStr)) {
+  cvVerificationDetails.experienceMatched = true;
+  cvVerificationDetails.extractedYears = Number(yearsOfExperience);
+} else {
   cvVerified = false;
 }
 
   } catch (err) {
-    console.error("CV verification error:", err);
-    cvVerified = false;
-    cvVerificationDetails.push("Error reading CV");
-  }
+  console.error("CV verification error:", err);
+  cvVerified = false;
+  cvVerificationDetails.error = "Error reading CV";
+}
+
 
   return { cvVerified, cvVerificationDetails };
 }
@@ -155,7 +322,7 @@ router.post(
     { name: "Upload ID", maxCount: 1 },
     { name: "Upload CV", maxCount: 1 },
     { name: "Portfolio", maxCount: 5 },
-    { name: "ExtraCertificate", maxCount: 5 },
+    { name: "Extra Certificate", maxCount: 5 },
   ]),
   async (req, res) => {
     try {
@@ -279,10 +446,10 @@ if (!strongPasswordRegex.test(password)) {
 
       // Flexible ward check
 // Flexible ward check
-const robustWardMatch = (wardNo, text) => {
-  const regex = new RegExp(`ward\\D*${wardNo}`, "i");
-  return regex.test(text);
-};
+        const robustWardMatch = (wardNo, text) => {
+        const regex = new RegExp(`ward\\D*${wardNo}`, "i");
+        return regex.test(text);
+        };
 
 
 
@@ -351,7 +518,6 @@ const robustWardMatch = (wardNo, text) => {
         Municipality: municipality,
           "Ward No": wardNo,
         "ID type": idType,
-        idDocument: idPath,
         cvDocument: cvPath,
         Portfolio: portfolioPaths,
         "Extra Certificate": extraCertificatePaths,
@@ -361,9 +527,15 @@ const robustWardMatch = (wardNo, text) => {
         cvVerificationDetails,
         otp,
         otpExpires,
-          isVerified: false,
+           homeLocation: { province, district, municipality, ward: wardNo },
+        currentLocation: { type: "Point", coordinates: [0, 0] },
+        ratings: { avgRating: 0, totalRatings: 0 }
       });
-
+       // ✅ Set verification flags
+        sp.cvVerified = cvVerified;
+        sp.idVerified = passed;
+        sp.isVerified = false; // require OTP verification
+       
       await sp.save();
       console.log("sp: Registration successful for", email);
       res.json({ message: "sp: Registered successfully, OTP sent via email" });
@@ -434,9 +606,9 @@ router.post("/sp-login", async (req, res) => {
 });
 
 // ---------------------------
-// Profile
+// Get own profile
 // ---------------------------
-router.get("/sp-me", auth, async (req, res) => {
+router.get("/sp-me", spAuth, async (req, res) => {
   try {
     const user = await ServiceProvider.findById(req.user.id).select("-password -otp -otpExpires");
     if (!user) return res.status(404).json({ error: "sp: User not found" });
@@ -447,7 +619,26 @@ router.get("/sp-me", auth, async (req, res) => {
     res.status(500).json({ error: "sp: Server error", details: err.message });
   }
 });
+// Update current GPS location
+// ---------------------------
+router.post("/sp-location", spAuth, async (req, res) => {
+  try {
+    const { longitude, latitude } = req.body;
+    console.log("sp: Location update request", { longitude, latitude });
+    if (typeof longitude !== "number" || typeof latitude !== "number")
+      return res.status(400).json({ error: "longitude and latitude required" });
 
+    const user = await ServiceProvider.findByIdAndUpdate(req.user.id, {
+      currentLocation: { type: "Point", coordinates: [longitude, latitude] }
+    }, { new: true });
+
+    console.log("sp: Location updated", user.currentLocation);
+    res.json({ message: "Location updated", currentLocation: user.currentLocation });
+  } catch (err) {
+    console.error("sp: Location update error:", err);
+    res.status(500).json({ error: "Server error", details: err.message });
+  }
+});
 // ---------------------------
 // Resend OTP
 // ---------------------------
@@ -475,7 +666,7 @@ router.post("/sp-resend-otp", async (req, res) => {
 // ---------------------------
 // File view
 // ---------------------------
-router.get("/sp-file/:userId/:fileType", auth, async (req, res) => {
+router.get("/sp-file/:userId/:fileType", spAuth, async (req, res) => {
   try {
     const { userId, fileType } = req.params;
     if (req.user.id !== userId) return res.status(403).json({ error: "sp: Access denied" });
