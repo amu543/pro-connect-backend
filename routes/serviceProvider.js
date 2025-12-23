@@ -91,30 +91,7 @@ async function updateProviderRating(providerId) {
     console.log("sp: Ratings reset to 0");
   }
 }
-// Notify SPs about new request (called by customer backend)
-router.post("/notify", async (req, res) => {
-  try {
-    const io = req.app.get("io");
-    const { spIds, request } = req.body;
 
-    if (!spIds || !request) {
-      return res.status(400).json({ error: "spIds and request required" });
-    }
-
-    spIds.forEach((spId) => {
-      io.to(spId).emit("newRequest", {
-        requestId: request.id,
-        customerLocation: request.location,
-        distance: request.distance || null, // optional if calculated by customer backend
-      });
-    });
-
-    res.json({ message: "Notifications sent to SPs" });
-  } catch (err) {
-    console.error("SP notify error:", err);
-    res.status(500).json({ error: "Server error", details: err.message });
-  }
-});
 
 // ---------------------------
 // Get incoming requests for SP
@@ -148,6 +125,14 @@ router.post("/sp-request-accept/:requestId", spAuth, async (req, res) => {
     request.status = "accepted";
     await request.save();
     console.log("sp: Request accepted", requestId);
+       // 🔔 NOTIFY CUSTOMER
+    const io = req.app.get("io");
+    io.to(request.customerId.toString()).emit("requestAccepted", {
+      requestId: request._id,
+      spId: req.user.id,
+      status: "accepted",
+      message: "Service provider accepted your request"
+    });
 
     res.json({ message: "Request accepted", request });
   } catch (err) {
@@ -170,6 +155,14 @@ router.post("/sp-request-reject/:requestId", spAuth, async (req, res) => {
     request.status = "rejected";
     await request.save();
     console.log("sp: Request rejected", requestId);
+     // 🔔 NOTIFY CUSTOMER
+    const io = req.app.get("io");
+    io.to(request.customerId.toString()).emit("requestRejected", {
+      requestId: request._id,
+      spId: req.user.id,
+      status: "rejected",
+      message: "Service provider rejected your request"
+    });
 
     res.json({ message: "Request rejected", request });
   } catch (err) {
@@ -192,6 +185,14 @@ router.post("/sp-request-complete/:requestId", spAuth, async (req, res) => {
     request.status = "completed";
     await request.save();
     console.log("sp: Request completed", requestId);
+       // 🔔 NOTIFY CUSTOMER
+    const io = req.app.get("io");
+    io.to(request.customerId.toString()).emit("requestCompleted", {
+      requestId: request._id,
+      spId: req.user.id,
+      status: "completed",
+      message: "Your service has been completed"
+    });
 
     // Optionally, recalc ratings if customer already rated
     await updateProviderRating(req.user.id);
@@ -341,6 +342,7 @@ router.post(
       const email = body["Email"];
       const phone = body["Phone"];
       const password = body["Password"];
+      const sex = body["Sex"];
       const confirmPassword = body["Confirm Password"];
       const service = body["Service"];
       const yearsOfExperience = body["Year of Experience"];
@@ -364,6 +366,7 @@ router.post(
       const missingFields = [];
       if (!fullName) missingFields.push("Full Name");
       if (!email) missingFields.push("Email");
+      if (!sex) missingFields.push("Sex");
       if (!phone) missingFields.push("Phone");
       if (!password) missingFields.push("Password");
       if (!confirmPassword) missingFields.push("Confirm Password");
@@ -383,6 +386,11 @@ router.post(
         console.log("sp: Missing mandatory fields:", missingFields);
         return res.status(400).json({ error: "sp: Missing mandatory fields", fields: missingFields });
       }
+             // ✅ Validate gender value
+            const allowedSex = ["Male", "Female", "Other"];
+            if (!allowedSex.includes(sex)) {
+            return res.status(400).json({ error: `Sex must be one of ${allowedSex.join(", ")}` });
+                  }
 
       if (password !== confirmPassword)
         return res.status(400).json({ error: "sp: Passwords do not match" });
@@ -438,31 +446,108 @@ if (!strongPasswordRegex.test(password)) {
       const ocrText = await performOCR(idPath);
       console.log("OCR Text snippet:", ocrText.substring(0, 300));
 
-      // Flexible name check
-      const robustNameMatch = (fullName, text) => {
-        const parts = fullName.toLowerCase().split(" ").filter(Boolean);
-        return parts.every(p => text.toLowerCase().includes(p));
+    const stringSimilarity = require("string-similarity");
+
+// Normalize Nepali + English characters, remove spaces/punctuation, lowercase
+const normalizeText = text => {
+  const nepaliMap = {
+    "अ":"a","आ":"aa","इ":"i","ई":"ii","उ":"u","ऊ":"uu",
+    "ए":"e","ऐ":"ai","ओ":"o","औ":"au","ऋ":"ri","ॠ":"rri",
+    "ऌ":"li","ॡ":"lli",
+    "ा":"a","ि":"i","ी":"ii","ु":"u","ू":"uu","े":"e","ै":"ai",
+    "ो":"o","ौ":"au","ृ":"ri","ॄ":"rri","ॢ":"li","ॣ":"lli",
+    "क":"k","ख":"kh","ग":"g","घ":"gh","ङ":"ng",
+    "च":"ch","छ":"chh","ज":"j","झ":"jh","ञ":"ny",
+    "ट":"t","ठ":"th","ड":"d","ढ":"dh","ण":"n",
+    "त":"t","थ":"th","द":"d","ध":"dh","न":"n",
+    "प":"p","फ":"ph","ब":"b","भ":"bh","म":"m",
+    "य":"y","र":"r","ल":"l","व":"w","श":"sh",
+    "ष":"sh","स":"s","ह":"h",
+    "क्ष":"ksh","त्र":"tr","ज्ञ":"gy",
+    "ं":"n","ः":"h","ँ":"n",
+    "०":"0","१":"1","२":"2","३":"3","४":"4",
+    "५":"5","६":"6","७":"7","८":"8","९":"9"
+  };
+  return text
+    .split("")
+    .map(c => nepaliMap[c] || c)
+    .join("")
+    .replace(/[\s\.\-_,]/g, "") // remove spaces, dots, commas, hyphens
+    .toLowerCase();
+};
+ // Extract Nepali/English name from OCR
+      const extractNepaliName = (ocrText) => {
+        const nameRegex = /(?:नाम थर|Full Name)\s*[:.]\s*(.+)/i;
+        const match = ocrText.match(nameRegex);
+        if (match && match[1]) return match[1].trim();
+        return ""; // fallback
       };
 
-      // Flexible ward check
-// Flexible ward check
-        const robustWardMatch = (wardNo, text) => {
-        const regex = new RegExp(`ward\\D*${wardNo}`, "i");
-        return regex.test(text);
-        };
+      const extractedName = extractNepaliName(ocrText);
+      console.log("Extracted Name from OCR:", extractedName);
+// ---------------------------
+// Robust name verification (Flexible for Nepali OCR)
+// ---------------------------
+function verifyName(fullName, ocrText) {
+  const normalize = text => text.replace(/\s+/g, "").toLowerCase();
+  const nameParts = fullName.split(/\s+/).map(n => normalize(n));
+  const ocrNormalized = normalize(ocrText);
+
+  let matchCount = 0;
+  for (const part of nameParts) {
+    if (ocrNormalized.includes(part)) matchCount++;
+  }
+  console.log("Name parts matched:", matchCount, "/", nameParts.length);
+
+  // Accept if at least 70% of name parts match
+  return matchCount / nameParts.length >= 0.7;
+}
+
+ 
+       // Map Nepali digits to ASCII digits
+const nepaliDigitMap = { "०":"0","१":"1","२":"2","३":"3","४":"4","५":"5","६":"6","७":"7","८":"8","९":"9" };
+const normalizeDigits = text =>
+  text.split("").map(c => nepaliDigitMap[c] || c).join("");
+
+// Robust ward verification
+const robustWardMatch = (wardNo, ocrText) => {
+  // Normalize OCR text: Nepali->ASCII, remove spaces/punctuation
+  const normalizedOCR = normalizeText(normalizeDigits(ocrText.replace(/वडा|ward/gi, "")));
+  const normalizedWard = normalizeText(normalizeDigits(wardNo.toString()));
+
+  // 1️⃣ Direct inclusion
+  if (normalizedOCR.includes(normalizedWard)) return true;
+
+  // 2️⃣ Fuzzy similarity fallback
+  const stringSimilarity = require("string-similarity");
+  const score = stringSimilarity.compareTwoStrings(normalizedWard, normalizedOCR);
+  console.log(`Ward verification score: ${score.toFixed(2)}`);
+  return score >= 0.7; // accept if similarity >= 70%
+};
+     // Extract gender/sex from OCR text
+const extractSex = (ocrText) => {
+  const sexRegex = /लिङ्ग|Sex\s*[:.]\s*(Male|Female|Other)/i;
+  const match = ocrText.match(sexRegex);
+  if (match && match[1]) return match[1].trim();
+  return ""; // fallback if not found
+};
+
+const extractedSex = extractSex(ocrText);
+console.log("Extracted Sex from OCR:", extractedSex);
 
 
 
       // Flexible ID type detection
       const robustDetectIDType = text => {
-        const normalized = text.replace(/\s|-/g, "");
+        const normalized = normalizeText(text).replace(/[-.\s]/g, "");
         if (/\d{2}\d{2}\d{2}\d{5}/.test(normalized)) return "Citizenship";
         if (/^\d{5,8}$/.test(normalized)) return "License";
+        if (/^\d{10}$/.test(normalized)) return "National ID";
         if (/^[A-Z][0-9]{7}$/.test(normalized)) return "Passport";
         return "Unknown";
       };
 
-      const nameMatch = robustNameMatch(fullName, ocrText);
+      const nameMatch = verifyName(fullName, ocrText);
       console.log("Name Match:", nameMatch);
 
       const wardMatch = robustWardMatch(wardNo, ocrText);
@@ -471,6 +556,9 @@ if (!strongPasswordRegex.test(password)) {
       const detectedID = robustDetectIDType(ocrText);
       const idTypeMatch = detectedID.toLowerCase() === idType.toLowerCase();
       console.log("Detected ID Type:", detectedID, "| Required:", idType);
+
+      const sexMatch = extractedSex.toLowerCase() === sex.toLowerCase();
+      console.log("Sex Match:", sexMatch);
 
       const passed = nameMatch && wardMatch && idTypeMatch;
       if (!passed) {
@@ -507,6 +595,7 @@ if (!strongPasswordRegex.test(password)) {
         "Full Name": fullName,
         email,
         phone,
+        Sex: sex,
         password: hashedPassword,
         "Profile Photo": profilePath,
         Service: service,

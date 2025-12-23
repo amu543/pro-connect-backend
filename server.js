@@ -61,13 +61,13 @@ app.use((req, res) => {
 
 // Socket.IO connection
 io.on("connection", (socket) => {
-  console.log("SP connected: " + socket.id);
-
-  // SP joins a room using their SP ID after login
-  socket.on("joinRoom", (spId) => {
-    socket.join(spId);
-    console.log(`SP ${spId} joined their notification room`);
+  console.log("Socket connected: " + socket.id);
+ // Any user (SP or Customer) joins their own room
+  socket.on("joinRoom", (userId) => {
+    socket.join(userId);
+    console.log(`User ${userId} joined room`);
   });
+ 
   socket.on("disconnect", () => {
     console.log("SP disconnected:", socket.id);
   });
