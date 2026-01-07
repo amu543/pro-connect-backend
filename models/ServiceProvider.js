@@ -4,6 +4,7 @@ const ServiceProviderSchema = new mongoose.Schema({
   "Full Name": { type: String, required: true },
   email: { type: String, required: true, unique: true },
   phone: { type: String, required: true },
+    Sex: {type: String,enum: ["Male", "Female", "Other"],required: true },
   password: { type: String, required: true },
   "Profile Photo": { type: String, required: true },
   Service: { type: String, required: true },
@@ -20,7 +21,8 @@ const ServiceProviderSchema = new mongoose.Schema({
   Portfolio: { type: [String] }, // multiple portfolio files
   "Extra Certificate": { type: [String] }, // multiple extra certificates
   idTextOCR: { type: String }, // OCR text from ID
-  cvVerified: { type: Boolean, default: false },
+   idVerified: { type: Boolean, default: false }, // default false
+  idVerificationDetails: { type: Object, default: {} }, // details filled later
    cvVerificationDetails: {
     nameMatched: { type: Boolean, default: false },
     serviceMatched: { type: Boolean, default: false },

@@ -112,6 +112,42 @@ router.get("/sp-requests", spAuth, async (req, res) => {
 });
 
 // ---------------------------
+// Get accepted requests for SP
+// ---------------------------
+router.get("/sp-requests/accepted", spAuth, async (req, res) => {
+  try {
+    const requests = await ServiceRequest.find({
+      serviceProviderId: req.user.id,
+      status: "accepted"
+    })
+      .populate("customerId", "name phone")
+      .sort({ createdAt: -1 });
+
+    res.json(requests);
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ---------------------------
+// Get completed requests for SP
+// ---------------------------
+router.get("/sp-requests/completed", spAuth, async (req, res) => {
+  try {
+    const requests = await ServiceRequest.find({
+      serviceProviderId: req.user.id,
+      status: "completed"
+    })
+      .populate("customerId", "name phone")
+      .sort({ createdAt: -1 });
+
+    res.json(requests);
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ---------------------------
 // Accept a request
 // ---------------------------
 router.post("/sp-request-accept/:requestId", spAuth, async (req, res) => {
@@ -439,8 +475,7 @@ if (!strongPasswordRegex.test(password)) {
       const portfolioPaths = portfolioFiles.map(f => saveFile(f, "Portfolio"));
       const extraCertificatePaths = extraCertFiles.map(f => saveFile(f, "Extra Certificate"));
 
-      // ---------------------------
-      // Robust ID Verification
+    // Robust ID Verification
       // ---------------------------
       console.log("OCR Started...");
       const ocrText = await performOCR(idPath);
@@ -560,7 +595,7 @@ console.log("Extracted Sex from OCR:", extractedSex);
       const sexMatch = extractedSex.toLowerCase() === sex.toLowerCase();
       console.log("Sex Match:", sexMatch);
 
-      const passed = nameMatch && wardMatch && idTypeMatch;
+      const passed = nameMatch && wardMatch && idTypeMatch ;
       if (!passed) {
         return res.status(400).json({
           success: false,
@@ -569,13 +604,10 @@ console.log("Extracted Sex from OCR:", extractedSex);
         });
       }
        
-
  // ---------------------------
       // CV Verification (Case-Insensitive)
       // ---------------------------
       const { cvVerified, cvVerificationDetails } = await verifyCV(cvPath, fullName, service, skills, yearsOfExperience);
-     
-
       // ---------------------------
       // Hash password
       // ---------------------------
@@ -587,7 +619,6 @@ console.log("Extracted Sex from OCR:", extractedSex);
       const otp = generateOTP();
       const otpExpires = new Date(Date.now() + 5 * 60 * 1000);
       await sendEmailOTP(email, otp);
-
       // ---------------------------
       // Save SP
       // ---------------------------
@@ -623,8 +654,7 @@ console.log("Extracted Sex from OCR:", extractedSex);
        // ✅ Set verification flags
         sp.cvVerified = cvVerified;
         sp.idVerified = passed;
-        sp.isVerified = false; // require OTP verification
-       
+        sp.isVerified = false; // require OTP verification  
       await sp.save();
       console.log("sp: Registration successful for", email);
       res.json({ message: "sp: Registered successfully, OTP sent via email" });
@@ -685,12 +715,54 @@ router.post("/sp-login", async (req, res) => {
     const isMatch = await bcrypt.compare(Password, user.password);
     if (!isMatch) return res.status(400).json({ error: "sp: Invalid password" });
 
-    const token = jwt.sign({ id: user._id, email: user.email }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN });
-    console.log("sp: Login successful for", Email);
-    res.json({ message: "sp: Login successful", token, user: { id: user._id, email: user.email } });
+     // ✅ ADD ROLE HERE
+    const token = jwt.sign(
+      {
+        id: user._id,
+        email: user.email,
+        role: "service_provider"   // 👈 IMPORTANT
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN }
+    );
+
+    res.json({
+      message: "Login successful",
+      token,
+      user: {
+        id: user._id,
+        email: user.email,
+        role: "service_provider"
+      }
+    });
   } catch (err) {
-    console.error("sp: Login error", err);
-    res.status(500).json({ error: "sp: Server error", details: err.message });
+    console.error("Login error", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ---------------------------
+// Role-based Logout (Service Provider)
+// ---------------------------
+router.post("/sp-logout", spAuth, async (req, res) => {
+  try {
+    // 🔐 Role verification
+    if (req.user.role !== "service_provider") {
+      return res.status(403).json({ error: "Unauthorized role" });
+    }
+
+    console.log("sp: Service Provider logged out:", req.user.id);
+
+    // 🚫 JWT is stateless → frontend must delete it
+    res.json({
+      success: true,
+      role: "service_provider",
+      message: "Service Provider logged out successfully"
+    });
+
+  } catch (err) {
+    console.error("sp: Logout error", err);
+    res.status(500).json({ error: "Server error" });
   }
 });
 

@@ -8,6 +8,9 @@ const spAuth = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (decoded.role !== "service_provider") {
+      return res.status(403).json({ error: "Access denied" });
+    }
     req.user = decoded;
      console.log("✅ sp: Auth verified for user:", decoded.email);
     next();

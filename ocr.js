@@ -8,7 +8,7 @@ const Tesseract = require("tesseract.js");
 async function performOCR(imagePath) {
   try {
     console.log(`🧐 Performing OCR on: ${imagePath}`);
-    const result = await Tesseract.recognize(imagePath, "eng", {
+    const result = await Tesseract.recognize(imagePath, "nep+eng", {
       logger: (m) => console.log("Tesseract log:", m),
     });
 
