@@ -13,9 +13,12 @@ const ServiceProvider = require("../models/ServiceProvider");
 const ServiceRequest = require("../models/spServiceRequest");
 const Rating = require("../models/sprating");
 const spAuth = require("../middleware/spauth");
+const requireLocation = require("../middleware/requireLocation");
 const nodemailer = require("nodemailer");
 require("dotenv").config();
 const { performOCR } = require("../ocr");
+console.log("spAuth:", typeof spAuth);
+console.log("requireLocation:", typeof requireLocation);
 
 // OTP HELPERS
 // ===================================================
@@ -47,7 +50,6 @@ const ensureFolderExists = folderPath => {
     console.log("sp: Folder created:", folderPath);
   }
 };
-
 // ---------------------------
 // Multer config
 // ---------------------------
@@ -114,7 +116,7 @@ router.get("/sp-requests", spAuth, async (req, res) => {
 // ---------------------------
 // Get accepted requests for SP
 // ---------------------------
-router.get("/sp-requests/accepted", spAuth, async (req, res) => {
+router.get("/sp-requests/accepted", spAuth, requireLocation, async (req, res) => {
   try {
     const requests = await ServiceRequest.find({
       serviceProviderId: req.user.id,
@@ -150,7 +152,7 @@ router.get("/sp-requests/completed", spAuth, async (req, res) => {
 // ---------------------------
 // Accept a request
 // ---------------------------
-router.post("/sp-request-accept/:requestId", spAuth, async (req, res) => {
+router.post("/sp-request-accept/:requestId", spAuth, requireLocation, async (req, res) => {
   try {
     const { requestId } = req.params;
     console.log("sp: Accepting request", requestId);
@@ -161,7 +163,7 @@ router.post("/sp-request-accept/:requestId", spAuth, async (req, res) => {
     request.status = "accepted";
     await request.save();
     console.log("sp: Request accepted", requestId);
-       // 🔔 NOTIFY CUSTOMER
+    // 🔔 NOTIFY CUSTOMER
     const io = req.app.get("io");
     io.to(request.customerId.toString()).emit("requestAccepted", {
       requestId: request._id,
@@ -180,7 +182,7 @@ router.post("/sp-request-accept/:requestId", spAuth, async (req, res) => {
 // ---------------------------
 // Reject a request
 // ---------------------------
-router.post("/sp-request-reject/:requestId", spAuth, async (req, res) => {
+router.post("/sp-request-reject/:requestId", spAuth, requireLocation, async (req, res) => {
   try {
     const { requestId } = req.params;
     console.log("sp: Rejecting request", requestId);
@@ -191,7 +193,7 @@ router.post("/sp-request-reject/:requestId", spAuth, async (req, res) => {
     request.status = "rejected";
     await request.save();
     console.log("sp: Request rejected", requestId);
-     // 🔔 NOTIFY CUSTOMER
+    // 🔔 NOTIFY CUSTOMER
     const io = req.app.get("io");
     io.to(request.customerId.toString()).emit("requestRejected", {
       requestId: request._id,
@@ -210,7 +212,7 @@ router.post("/sp-request-reject/:requestId", spAuth, async (req, res) => {
 // ---------------------------
 // Mark request as completed
 // ---------------------------
-router.post("/sp-request-complete/:requestId", spAuth, async (req, res) => {
+router.post("/sp-request-complete/:requestId", spAuth, requireLocation, async (req, res) => {
   try {
     const { requestId } = req.params;
     console.log("sp: Completing request", requestId);
@@ -221,7 +223,7 @@ router.post("/sp-request-complete/:requestId", spAuth, async (req, res) => {
     request.status = "completed";
     await request.save();
     console.log("sp: Request completed", requestId);
-       // 🔔 NOTIFY CUSTOMER
+    // 🔔 NOTIFY CUSTOMER
     const io = req.app.get("io");
     io.to(request.customerId.toString()).emit("requestCompleted", {
       requestId: request._id,
@@ -256,11 +258,12 @@ async function verifyCV(cvPath, fullName, service, skills, yearsOfExperience) {
     serviceMatched: false,
     skillsMatched: [],
     experienceMatched: false,
-    extractedYears: null};
+    extractedYears: null
+  };
 
-    const ext = path.extname(cvPath).toLowerCase();
-     try{
-       if (ext === ".pdf") {
+  const ext = path.extname(cvPath).toLowerCase();
+  try {
+    if (ext === ".pdf") {
       // ✅ Use legacy build for Node.js
       const data = new Uint8Array(fs.readFileSync(cvPath));
       const pdf = await pdfjsLib.getDocument({ data }).promise;
@@ -291,43 +294,43 @@ async function verifyCV(cvPath, fullName, service, skills, yearsOfExperience) {
 
     // Case-insensitive checks
     // Name check
-if (cvText.includes(fullName.toLowerCase())) {
-  cvVerificationDetails.nameMatched = true;
-} else {
-  cvVerified = false;
-}
+    if (cvText.includes(fullName.toLowerCase())) {
+      cvVerificationDetails.nameMatched = true;
+    } else {
+      cvVerified = false;
+    }
 
-// Service check
-if (cvText.includes(service.toLowerCase())) {
-  cvVerificationDetails.serviceMatched = true;
-} else {
-  cvVerified = false;
-}
+    // Service check
+    if (cvText.includes(service.toLowerCase())) {
+      cvVerificationDetails.serviceMatched = true;
+    } else {
+      cvVerified = false;
+    }
 
-// Skills check
-skills.forEach(skill => {
-  if (cvText.includes(skill.toLowerCase())) {
-    cvVerificationDetails.skillsMatched.push(skill);
-  }
-});
-if (cvVerificationDetails.skillsMatched.length === 0) {
-  cvVerified = false;
-}
+    // Skills check
+    skills.forEach(skill => {
+      if (cvText.includes(skill.toLowerCase())) {
+        cvVerificationDetails.skillsMatched.push(skill);
+      }
+    });
+    if (cvVerificationDetails.skillsMatched.length === 0) {
+      cvVerified = false;
+    }
 
-// Experience check
-const experienceStr = String(yearsOfExperience).toLowerCase();
-if (cvText.includes(experienceStr)) {
-  cvVerificationDetails.experienceMatched = true;
-  cvVerificationDetails.extractedYears = Number(yearsOfExperience);
-} else {
-  cvVerified = false;
-}
+    // Experience check
+    const experienceStr = String(yearsOfExperience).toLowerCase();
+    if (cvText.includes(experienceStr)) {
+      cvVerificationDetails.experienceMatched = true;
+      cvVerificationDetails.extractedYears = Number(yearsOfExperience);
+    } else {
+      cvVerified = false;
+    }
 
   } catch (err) {
-  console.error("CV verification error:", err);
-  cvVerified = false;
-  cvVerificationDetails.error = "Error reading CV";
-}
+    console.error("CV verification error:", err);
+    cvVerified = false;
+    cvVerificationDetails.error = "Error reading CV";
+  }
 
 
   return { cvVerified, cvVerificationDetails };
@@ -337,10 +340,10 @@ if (cvText.includes(experienceStr)) {
 
 // =============== ID TYPE DETECTOR ===============
 function detectIDType(text) {
-if (/\d{2}-\d{2}-\d{2}-\d{5}/.test(text)) return "Citizenship";
-if (/\d{2}-\d{2}-\d{3,6}/.test(text)) return "License";
-if (/[A-Z][0-9]{7}/.test(text)) return "Passport";
-return "Unknown";
+  if (/\d{2}-\d{2}-\d{2}-\d{5}/.test(text)) return "Citizenship";
+  if (/\d{2}-\d{2}-\d{3,6}/.test(text)) return "License";
+  if (/[A-Z][0-9]{7}/.test(text)) return "Passport";
+  return "Unknown";
 }
 
 
@@ -387,7 +390,7 @@ router.post(
       const province = body["Province"];
       const district = body["District"];
       const municipality = body["Municipality"];
-      const wardNo = body["Ward No"]; 
+      const wardNo = body["Ward No"];
       const idType = body["ID type"] || body["ID Type"];
 
       const profilePhoto = files["Profile Photo"]?.[0];
@@ -412,7 +415,7 @@ router.post(
       if (!province) missingFields.push("Province");
       if (!district) missingFields.push("District");
       if (!municipality) missingFields.push("Municipality");
-       if (!wardNo) missingFields.push("Ward No");
+      if (!wardNo) missingFields.push("Ward No");
       if (!idType) missingFields.push("ID type");
       if (!profilePhoto) missingFields.push("Profile Photo");
       if (!idDocument) missingFields.push("Upload ID");
@@ -422,22 +425,22 @@ router.post(
         console.log("sp: Missing mandatory fields:", missingFields);
         return res.status(400).json({ error: "sp: Missing mandatory fields", fields: missingFields });
       }
-             // ✅ Validate gender value
-            const allowedSex = ["Male", "Female", "Other"];
-            if (!allowedSex.includes(sex)) {
-            return res.status(400).json({ error: `Sex must be one of ${allowedSex.join(", ")}` });
-                  }
+      // ✅ Validate gender value
+      const allowedSex = ["Male", "Female", "Other"];
+      if (!allowedSex.includes(sex)) {
+        return res.status(400).json({ error: `Sex must be one of ${allowedSex.join(", ")}` });
+      }
 
       if (password !== confirmPassword)
         return res.status(400).json({ error: "sp: Passwords do not match" });
       // ✅ Minimum 8 characters password
-          // Strong password validation (optional but recommended)
-const strongPasswordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
-if (!strongPasswordRegex.test(password)) {
-  return res.status(400).json({ 
-    error: "sp: Password must be at least 8 characters and include uppercase, lowercase, number, and special character" 
-  });
-}
+      // Strong password validation (optional but recommended)
+      const strongPasswordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
+      if (!strongPasswordRegex.test(password)) {
+        return res.status(400).json({
+          error: "sp: Password must be at least 8 characters and include uppercase, lowercase, number, and special character"
+        });
+      }
 
       const phoneRegex = /^\+977\d{10}$/;
       if (!phoneRegex.test(phone))
@@ -475,42 +478,42 @@ if (!strongPasswordRegex.test(password)) {
       const portfolioPaths = portfolioFiles.map(f => saveFile(f, "Portfolio"));
       const extraCertificatePaths = extraCertFiles.map(f => saveFile(f, "Extra Certificate"));
 
-    // Robust ID Verification
+      // Robust ID Verification
       // ---------------------------
       console.log("OCR Started...");
       const ocrText = await performOCR(idPath);
       console.log("OCR Text snippet:", ocrText.substring(0, 300));
 
-    const stringSimilarity = require("string-similarity");
+      const stringSimilarity = require("string-similarity");
 
-// Normalize Nepali + English characters, remove spaces/punctuation, lowercase
-const normalizeText = text => {
-  const nepaliMap = {
-    "अ":"a","आ":"aa","इ":"i","ई":"ii","उ":"u","ऊ":"uu",
-    "ए":"e","ऐ":"ai","ओ":"o","औ":"au","ऋ":"ri","ॠ":"rri",
-    "ऌ":"li","ॡ":"lli",
-    "ा":"a","ि":"i","ी":"ii","ु":"u","ू":"uu","े":"e","ै":"ai",
-    "ो":"o","ौ":"au","ृ":"ri","ॄ":"rri","ॢ":"li","ॣ":"lli",
-    "क":"k","ख":"kh","ग":"g","घ":"gh","ङ":"ng",
-    "च":"ch","छ":"chh","ज":"j","झ":"jh","ञ":"ny",
-    "ट":"t","ठ":"th","ड":"d","ढ":"dh","ण":"n",
-    "त":"t","थ":"th","द":"d","ध":"dh","न":"n",
-    "प":"p","फ":"ph","ब":"b","भ":"bh","म":"m",
-    "य":"y","र":"r","ल":"l","व":"w","श":"sh",
-    "ष":"sh","स":"s","ह":"h",
-    "क्ष":"ksh","त्र":"tr","ज्ञ":"gy",
-    "ं":"n","ः":"h","ँ":"n",
-    "०":"0","१":"1","२":"2","३":"3","४":"4",
-    "५":"5","६":"6","७":"7","८":"8","९":"9"
-  };
-  return text
-    .split("")
-    .map(c => nepaliMap[c] || c)
-    .join("")
-    .replace(/[\s\.\-_,]/g, "") // remove spaces, dots, commas, hyphens
-    .toLowerCase();
-};
- // Extract Nepali/English name from OCR
+      // Normalize Nepali + English characters, remove spaces/punctuation, lowercase
+      const normalizeText = text => {
+        const nepaliMap = {
+          "अ": "a", "आ": "aa", "इ": "i", "ई": "ii", "उ": "u", "ऊ": "uu",
+          "ए": "e", "ऐ": "ai", "ओ": "o", "औ": "au", "ऋ": "ri", "ॠ": "rri",
+          "ऌ": "li", "ॡ": "lli",
+          "ा": "a", "ि": "i", "ी": "ii", "ु": "u", "ू": "uu", "े": "e", "ै": "ai",
+          "ो": "o", "ौ": "au", "ृ": "ri", "ॄ": "rri", "ॢ": "li", "ॣ": "lli",
+          "क": "k", "ख": "kh", "ग": "g", "घ": "gh", "ङ": "ng",
+          "च": "ch", "छ": "chh", "ज": "j", "झ": "jh", "ञ": "ny",
+          "ट": "t", "ठ": "th", "ड": "d", "ढ": "dh", "ण": "n",
+          "त": "t", "थ": "th", "द": "d", "ध": "dh", "न": "n",
+          "प": "p", "फ": "ph", "ब": "b", "भ": "bh", "म": "m",
+          "य": "y", "र": "r", "ल": "l", "व": "w", "श": "sh",
+          "ष": "sh", "स": "s", "ह": "h",
+          "क्ष": "ksh", "त्र": "tr", "ज्ञ": "gy",
+          "ं": "n", "ः": "h", "ँ": "n",
+          "०": "0", "१": "1", "२": "2", "३": "3", "४": "4",
+          "५": "5", "६": "6", "७": "7", "८": "8", "९": "9"
+        };
+        return text
+          .split("")
+          .map(c => nepaliMap[c] || c)
+          .join("")
+          .replace(/[\s\.\-_,]/g, "") // remove spaces, dots, commas, hyphens
+          .toLowerCase();
+      };
+      // Extract Nepali/English name from OCR
       const extractNepaliName = (ocrText) => {
         const nameRegex = /(?:नाम थर|Full Name)\s*[:.]\s*(.+)/i;
         const match = ocrText.match(nameRegex);
@@ -520,55 +523,55 @@ const normalizeText = text => {
 
       const extractedName = extractNepaliName(ocrText);
       console.log("Extracted Name from OCR:", extractedName);
-// ---------------------------
-// Robust name verification (Flexible for Nepali OCR)
-// ---------------------------
-function verifyName(fullName, ocrText) {
-  const normalize = text => text.replace(/\s+/g, "").toLowerCase();
-  const nameParts = fullName.split(/\s+/).map(n => normalize(n));
-  const ocrNormalized = normalize(ocrText);
+      // ---------------------------
+      // Robust name verification (Flexible for Nepali OCR)
+      // ---------------------------
+      function verifyName(fullName, ocrText) {
+        const normalize = text => text.replace(/\s+/g, "").toLowerCase();
+        const nameParts = fullName.split(/\s+/).map(n => normalize(n));
+        const ocrNormalized = normalize(ocrText);
 
-  let matchCount = 0;
-  for (const part of nameParts) {
-    if (ocrNormalized.includes(part)) matchCount++;
-  }
-  console.log("Name parts matched:", matchCount, "/", nameParts.length);
+        let matchCount = 0;
+        for (const part of nameParts) {
+          if (ocrNormalized.includes(part)) matchCount++;
+        }
+        console.log("Name parts matched:", matchCount, "/", nameParts.length);
 
-  // Accept if at least 70% of name parts match
-  return matchCount / nameParts.length >= 0.7;
-}
+        // Accept if at least 70% of name parts match
+        return matchCount / nameParts.length >= 0.7;
+      }
 
- 
-       // Map Nepali digits to ASCII digits
-const nepaliDigitMap = { "०":"0","१":"1","२":"2","३":"3","४":"4","५":"5","६":"6","७":"7","८":"8","९":"9" };
-const normalizeDigits = text =>
-  text.split("").map(c => nepaliDigitMap[c] || c).join("");
 
-// Robust ward verification
-const robustWardMatch = (wardNo, ocrText) => {
-  // Normalize OCR text: Nepali->ASCII, remove spaces/punctuation
-  const normalizedOCR = normalizeText(normalizeDigits(ocrText.replace(/वडा|ward/gi, "")));
-  const normalizedWard = normalizeText(normalizeDigits(wardNo.toString()));
+      // Map Nepali digits to ASCII digits
+      const nepaliDigitMap = { "०": "0", "१": "1", "२": "2", "३": "3", "४": "4", "५": "5", "६": "6", "७": "7", "८": "8", "९": "9" };
+      const normalizeDigits = text =>
+        text.split("").map(c => nepaliDigitMap[c] || c).join("");
 
-  // 1️⃣ Direct inclusion
-  if (normalizedOCR.includes(normalizedWard)) return true;
+      // Robust ward verification
+      const robustWardMatch = (wardNo, ocrText) => {
+        // Normalize OCR text: Nepali->ASCII, remove spaces/punctuation
+        const normalizedOCR = normalizeText(normalizeDigits(ocrText.replace(/वडा|ward/gi, "")));
+        const normalizedWard = normalizeText(normalizeDigits(wardNo.toString()));
 
-  // 2️⃣ Fuzzy similarity fallback
-  const stringSimilarity = require("string-similarity");
-  const score = stringSimilarity.compareTwoStrings(normalizedWard, normalizedOCR);
-  console.log(`Ward verification score: ${score.toFixed(2)}`);
-  return score >= 0.7; // accept if similarity >= 70%
-};
-     // Extract gender/sex from OCR text
-const extractSex = (ocrText) => {
-  const sexRegex = /लिङ्ग|Sex\s*[:.]\s*(Male|Female|Other)/i;
-  const match = ocrText.match(sexRegex);
-  if (match && match[1]) return match[1].trim();
-  return ""; // fallback if not found
-};
+        // 1️⃣ Direct inclusion
+        if (normalizedOCR.includes(normalizedWard)) return true;
 
-const extractedSex = extractSex(ocrText);
-console.log("Extracted Sex from OCR:", extractedSex);
+        // 2️⃣ Fuzzy similarity fallback
+        const stringSimilarity = require("string-similarity");
+        const score = stringSimilarity.compareTwoStrings(normalizedWard, normalizedOCR);
+        console.log(`Ward verification score: ${score.toFixed(2)}`);
+        return score >= 0.7; // accept if similarity >= 70%
+      };
+      // Extract gender/sex from OCR text
+      const extractSex = (ocrText) => {
+        const sexRegex = /लिङ्ग|Sex\s*[:.]\s*(Male|Female|Other)/i;
+        const match = ocrText.match(sexRegex);
+        if (match && match[1]) return match[1].trim();
+        return ""; // fallback if not found
+      };
+
+      const extractedSex = extractSex(ocrText);
+      console.log("Extracted Sex from OCR:", extractedSex);
 
 
 
@@ -595,7 +598,7 @@ console.log("Extracted Sex from OCR:", extractedSex);
       const sexMatch = extractedSex.toLowerCase() === sex.toLowerCase();
       console.log("Sex Match:", sexMatch);
 
-      const passed = nameMatch && wardMatch && idTypeMatch ;
+      const passed = nameMatch && wardMatch && idTypeMatch;
       if (!passed) {
         return res.status(400).json({
           success: false,
@@ -603,8 +606,8 @@ console.log("Extracted Sex from OCR:", extractedSex);
           details: { nameMatch, wardMatch, idTypeMatch, ocrTextSnippet: ocrText.substring(0, 300) }
         });
       }
-       
- // ---------------------------
+
+      // ---------------------------
       // CV Verification (Case-Insensitive)
       // ---------------------------
       const { cvVerified, cvVerificationDetails } = await verifyCV(cvPath, fullName, service, skills, yearsOfExperience);
@@ -636,7 +639,7 @@ console.log("Extracted Sex from OCR:", extractedSex);
         Province: province,
         District: district,
         Municipality: municipality,
-          "Ward No": wardNo,
+        "Ward No": wardNo,
         "ID type": idType,
         cvDocument: cvPath,
         Portfolio: portfolioPaths,
@@ -647,14 +650,14 @@ console.log("Extracted Sex from OCR:", extractedSex);
         cvVerificationDetails,
         otp,
         otpExpires,
-           homeLocation: { province, district, municipality, ward: wardNo },
+        homeLocation: { province, district, municipality, ward: wardNo },
         currentLocation: { type: "Point", coordinates: [0, 0] },
         ratings: { avgRating: 0, totalRatings: 0 }
       });
-       // ✅ Set verification flags
-        sp.cvVerified = cvVerified;
-        sp.idVerified = passed;
-        sp.isVerified = false; // require OTP verification  
+      // ✅ Set verification flags
+      sp.cvVerified = cvVerified;
+      sp.idVerified = passed;
+      sp.isVerified = false; // require OTP verification  
       await sp.save();
       console.log("sp: Registration successful for", email);
       res.json({ message: "sp: Registered successfully, OTP sent via email" });
@@ -705,17 +708,32 @@ router.post("/sp-verify-otp", async (req, res) => {
 // ---------------------------
 router.post("/sp-login", async (req, res) => {
   try {
-    const { Email, Password } = req.body;
+    const { Email, Password, latitude, longitude } = req.body;
     if (!Email || !Password) return res.status(400).json({ error: "sp: Email and password required" });
-
+    if (
+      typeof latitude !== "number" ||
+      typeof longitude !== "number" ||
+      latitude < -90 || latitude > 90 ||
+      longitude < -180 || longitude > 180
+    ) {
+      return res.status(400).json({
+        error: "Location is required to login. Please enable GPS."
+      });
+    }
     const user = await ServiceProvider.findOne({ email: Email });
     if (!user) return res.status(400).json({ error: "sp: Email not registered" });
-     if (!user.isVerified)
+    if (!user.isVerified)
       return res.status(403).json({ error: "Email not verified" });
     const isMatch = await bcrypt.compare(Password, user.password);
     if (!isMatch) return res.status(400).json({ error: "sp: Invalid password" });
+    // ✅ SAVE LOCATION DURING LOGIN
+    user.currentLocation = {
+      type: "Point",
+      coordinates: [longitude, latitude]
+    };
 
-     // ✅ ADD ROLE HERE
+    await user.save();
+    // ✅ ADD ROLE HERE
     const token = jwt.sign(
       {
         id: user._id,
@@ -731,6 +749,7 @@ router.post("/sp-login", async (req, res) => {
       token,
       user: {
         id: user._id,
+        FullName: user["Full Name"],
         email: user.email,
         role: "service_provider"
       }
@@ -808,7 +827,7 @@ router.post("/sp-resend-otp", async (req, res) => {
     const { Email } = req.body;
     const user = await ServiceProvider.findOne({ email: Email });
     if (!user) return res.status(400).json({ error: "sp: Email not registered" });
-     if (user.isVerified)
+    if (user.isVerified)
       return res.status(400).json({ error: "Account already verified" });
 
     const otp = generateOTP();
