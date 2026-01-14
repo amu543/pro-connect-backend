@@ -4,7 +4,6 @@ const router = express.Router();
 const mongoose = require("mongoose");
 const spAuth = require("../middleware/spauth");
 const ServiceProvider = require("../models/ServiceProvider");
-const ServiceRequest = require("../models/spServiceRequest");
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
@@ -35,113 +34,39 @@ const saveFile = (file, folder) => {
   return fullPath;
 };
 
-// ---------------------------
-// Helper: Haversine distance in KM
-// ---------------------------
-function getDistanceKm(lat1, lon1, lat2, lon2) {
-  const R = 6371; // Earth radius in km
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) ** 2;
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
-
-// ---------------------------
-// Fetch incoming requests (pending) with distance
-// ---------------------------
-router.get("/incoming-requests", spAuth, async (req, res) => {
+router.get("/my-details", spAuth, async (req, res) => {
   try {
-    const sp = await ServiceProvider.findById(req.user.id);
-    if (!sp) return res.status(404).json({ error: "Service provider not found" });
+    const sp = await ServiceProvider.findById(req.user.id).select(
+      "fullName province district municipality wardNo Service skills address"
+    );
 
-    if (!sp.currentLocation?.coordinates || sp.currentLocation.coordinates.length !== 2) {
-      return res.status(400).json({ error: "GPS location not enabled" });
+    if (!sp) {
+      return res.status(404).json({ error: "Service provider not found" });
     }
 
-    const requests = await ServiceRequest.find({
-      serviceProviderId: req.user.id,
-      status: "pending",
-    }).populate("customerId", "name");
-
-    const response = requests.map(reqItem => {
-      const [lon, lat] = sp.currentLocation.coordinates;
-      const [custLon, custLat] = reqItem.location.coordinates || [0, 0];
-      return {
-        requestId: reqItem._id,
-        service: reqItem.service,
-        customerName: reqItem.customerId?.name || "Unknown",
-        requestedDate: reqItem.createdAt.toISOString().split("T")[0],
-        distanceKm: parseFloat(getDistanceKm(lat, lon, custLat, custLon).toFixed(1)),
-        status: reqItem.status,
-      };
+    res.json({
+      name: sp.fullName,
+      service: sp.Service,
+      address: {
+        address: sp.address || "",
+        municipality: sp.municipality || "",
+        ward: sp.wardNo || "",
+        district: sp.district || "",
+        province: sp.province || ""
+      },
+      skills: sp.skills.map(skill => ({
+        name: skill.name,
+        price: skill.price || null
+      }))
     });
 
-    res.json(response);
   } catch (err) {
-    console.error("Service Page: Error fetching incoming requests", err);
-    res.status(500).json({ error: "Server error", details: err.message });
+    console.error("Error fetching SP details:", err);
+    res.status(500).json({ error: "Server error" });
   }
 });
 
-// ---------------------------
-// Fetch accepted requests with full customer info + distance
-// ---------------------------
-router.get("/accepted-requests", spAuth, async (req, res) => {
-  try {
-    const sp = await ServiceProvider.findById(req.user.id);
-    if (!sp) return res.status(404).json({ error: "Service provider not found" });
 
-    const requests = await ServiceRequest.find({
-      serviceProviderId: req.user.id,
-      status: "accepted",
-    }).populate("customerId", "name phone location");
-
-    const response = requests.map(reqItem => {
-      const [lon, lat] = sp.currentLocation.coordinates;
-      const [custLon, custLat] = reqItem.location.coordinates || [0, 0];
-      return {
-        requestId: reqItem._id,
-        service: reqItem.service,
-        customerName: reqItem.customerId?.name || "Unknown",
-        customerPhone: reqItem.customerId?.phone || "",
-        customerLocation: reqItem.customerId?.location || null,
-        distanceKm: parseFloat(getDistanceKm(lat, lon, custLat, custLon).toFixed(1)),
-        requestedDate: reqItem.createdAt.toISOString().split("T")[0],
-        status: reqItem.status,
-      };
-    });
-
-    res.json(response);
-  } catch (err) {
-    console.error("Service Page: Error fetching accepted requests", err);
-    res.status(500).json({ error: "Server error", details: err.message });
-  }
-});
-
-// ---------------------------
-// Mark request as completed
-// ---------------------------
-router.post("/complete-request/:requestId", spAuth, async (req, res) => {
-  try {
-    const { requestId } = req.params;
-    const request = await ServiceRequest.findOne({ _id: requestId, serviceProviderId: req.user.id });
-    if (!request) return res.status(404).json({ error: "Request not found" });
-
-    request.status = "completed";
-    request.completedAt = new Date();
-    await request.save();
-
-    res.json({ message: "Request marked as completed", request });
-  } catch (err) {
-    console.error("Service Page: Error completing request", err);
-    res.status(500).json({ error: "Server error", details: err.message });
-  }
-});
 
 // ---------------------------
 // Profile update (photo, phone, CV, extra certs, portfolio, skills)

@@ -94,39 +94,84 @@ async function updateProviderRating(providerId) {
   }
 }
 
-
 // ---------------------------
-// Get incoming requests for SP
+// Helper: Haversine distance in KM
 // ---------------------------
-router.get("/sp-requests", spAuth, async (req, res) => {
+function getDistanceKm(lat1, lon1, lat2, lon2) {
+  const R = 6371; // Earth radius in km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+// Incoming (pending) requests
+router.get("/sp-requests/pending", spAuth, async (req, res) => {
   try {
-    console.log("sp: Fetching incoming service requests for", req.user.id);
-    const requests = await ServiceRequest.find({ serviceProviderId: req.user.id, status: 'pending' })
-      .populate('customerId', 'name phone')
+    const sp = await ServiceProvider.findById(req.user.id);
+    if (!sp) return res.status(404).json({ error: "Service provider not found" });
+    if (!sp.currentLocation?.coordinates || sp.currentLocation.coordinates.length !== 2)
+      return res.status(400).json({ error: "GPS location not enabled" });
+
+    const requests = await ServiceRequest.find({ serviceProviderId: req.user.id, status: "pending" })
+      .populate("customerId", "name phone location")
       .sort({ createdAt: -1 });
 
-    console.log("sp: Incoming requests fetched:", requests.length);
-    res.json(requests);
+    const response = requests.map(reqItem => {
+      const [lon, lat] = sp.currentLocation.coordinates;
+      const [custLon, custLat] = reqItem.location.coordinates || [0, 0];
+      return {
+        requestId: reqItem._id,
+        service: reqItem.service,
+        customerName: reqItem.customerId?.name || "Unknown",
+        requestedDate: reqItem.createdAt.toISOString().split("T")[0],
+        distanceKm: parseFloat(getDistanceKm(lat, lon, custLat, custLon).toFixed(1)),
+        status: reqItem.status,
+      };
+    });
+
+    res.json(response);
   } catch (err) {
-    console.error("sp: Error fetching requests:", err);
-    res.status(500).json({ error: "Server error", details: err.message });
+    console.error("Error fetching pending requests", err);
+    res.status(500).json({ error: "Server error" });
   }
 });
 
-// ---------------------------
-// Get accepted requests for SP
-// ---------------------------
-router.get("/sp-requests/accepted", spAuth, requireLocation, async (req, res) => {
+// Accepted requests
+router.get("/sp-requests/accepted", spAuth, async (req, res) => {
   try {
-    const requests = await ServiceRequest.find({
-      serviceProviderId: req.user.id,
-      status: "accepted"
-    })
-      .populate("customerId", "name phone")
-      .sort({ createdAt: -1 });
+    const sp = await ServiceProvider.findById(req.user.id);
+    if (!sp) return res.status(404).json({ error: "Service provider not found" });
 
-    res.json(requests);
+    const requests = await ServiceRequest.find({ serviceProviderId: req.user.id, status: "accepted" })
+      .populate("customerId", "name phone address municipality ward location")
+      .sort({ createdAt: -1 });
+const response = requests.map(reqItem => {
+      const [lon, lat] = sp.currentLocation.coordinates;
+      const [custLon, custLat] = reqItem.location.coordinates || [0, 0];
+      return {
+        requestId: reqItem._id,
+        service: reqItem.service,
+        customerName: reqItem.customerId?.name || "Unknown",
+        customerPhone: reqItem.customerId?.phone || "",
+        address: reqItem.customerId?.address || "",
+    municipality: reqItem.customerId?.municipality || "",
+    ward: reqItem.customerId?.ward || "",
+        distanceKm: parseFloat(getDistanceKm(lat, lon, custLat, custLon).toFixed(1)),
+        requestedDate: reqItem.createdAt.toISOString().split("T")[0],
+        status: reqItem.status,
+      };
+    });
+
+    res.json(response);
+    
+   
   } catch (err) {
+    console.error("Error fetching accepted requests", err);
     res.status(500).json({ error: "Server error" });
   }
 });
@@ -140,11 +185,12 @@ router.get("/sp-requests/completed", spAuth, async (req, res) => {
       serviceProviderId: req.user.id,
       status: "completed"
     })
-      .populate("customerId", "name phone")
+      .populate("customerId", "name phone location")
       .sort({ createdAt: -1 });
 
     res.json(requests);
   } catch (err) {
+    console.error("Error fetching completed requests", err);
     res.status(500).json({ error: "Server error" });
   }
 });
