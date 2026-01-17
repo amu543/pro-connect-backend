@@ -1,16 +1,29 @@
 //models/spServiceRequest.js
 const mongoose = require('mongoose');
 const serviceRequestSchema = new mongoose.Schema({
-  customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  serviceProviderId: { type: mongoose.Schema.Types.ObjectId, ref: 'ServiceProvider', required: true },
+  customer: { 
+    type: mongoose.Schema.Types.ObjectId,
+     ref: 'Customer', 
+     required: true 
+    },
+  provider: { type: mongoose.Schema.Types.ObjectId, 
+  ref: 'ServiceProvider',
+   required: true
+},
   service: { type: String, required: true },
-  status: { type: String, enum: ['pending', 'accepted', 'rejected', 'completed'], default: 'pending' },
+  status: { type: String, enum: ['pending', 'accepted', 'in_progress','rejected', 'completed'], default: 'pending' },
   location: {
     type: { type: String, enum: ['Point'], default: 'Point' },
-    coordinates: { type: [Number], default: [0, 0] }
+    coordinates: {
+       type: [Number], 
+       required: true
+      }
+    }
   },
-  createdAt: { type: Date, default: Date.now }
-});
+  {
+  timestamps: true
+  }
+);
 
 serviceRequestSchema.index({ location: "2dsphere" });
 

@@ -15,6 +15,7 @@ const ServiceProviderSchema = new mongoose.Schema({
   District: { type: String, required: true },
   Municipality: { type: String, required: true },
   "Ward No": { type: String, required: true }, 
+   role: { type: String, default: "provider" }, 
   "ID type": { type: String, required: true },
   idDocument: { type: String, required: true },
   cvDocument: { type: String, required: true },
@@ -31,6 +32,10 @@ const ServiceProviderSchema = new mongoose.Schema({
     extractedYears: { type: Number, default: null },
     error: { type: String, default: null }
   },
+  isOnline: {
+      type: Boolean,
+      default: false
+    },
   isVerified: {
   type: Boolean,
   default: false,

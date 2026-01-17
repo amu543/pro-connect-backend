@@ -1,3 +1,4 @@
+//middleware/requireLocation.js
 const ServiceProvider = require("../models/ServiceProvider");
 
 module.exports = async function requireLocation(req, res, next) {

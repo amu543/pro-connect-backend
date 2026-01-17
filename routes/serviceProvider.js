@@ -11,7 +11,7 @@ const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
 const mammoth = require("mammoth");
 const ServiceProvider = require("../models/ServiceProvider");
 const ServiceRequest = require("../models/spServiceRequest");
-const Rating = require("../models/sprating");
+const Rating = require("../models/rating");
 const spAuth = require("../middleware/spauth");
 const requireLocation = require("../middleware/requireLocation");
 const nodemailer = require("nodemailer");
@@ -117,8 +117,8 @@ router.get("/sp-requests/pending", spAuth, async (req, res) => {
     if (!sp.currentLocation?.coordinates || sp.currentLocation.coordinates.length !== 2)
       return res.status(400).json({ error: "GPS location not enabled" });
 
-    const requests = await ServiceRequest.find({ serviceProviderId: req.user.id, status: "pending" })
-      .populate("customerId", "name phone location")
+    const requests = await ServiceRequest.find({ provider: req.user.id, status: "pending" })
+      .populate("customer", "fullName phone location")
       .sort({ createdAt: -1 });
 
     const response = requests.map(reqItem => {
@@ -127,7 +127,7 @@ router.get("/sp-requests/pending", spAuth, async (req, res) => {
       return {
         requestId: reqItem._id,
         service: reqItem.service,
-        customerName: reqItem.customerId?.name || "Unknown",
+        customerName: reqItem.customer?.fullName || "Unknown",
         requestedDate: reqItem.createdAt.toISOString().split("T")[0],
         distanceKm: parseFloat(getDistanceKm(lat, lon, custLat, custLon).toFixed(1)),
         status: reqItem.status,
@@ -147,8 +147,8 @@ router.get("/sp-requests/accepted", spAuth, async (req, res) => {
     const sp = await ServiceProvider.findById(req.user.id);
     if (!sp) return res.status(404).json({ error: "Service provider not found" });
 
-    const requests = await ServiceRequest.find({ serviceProviderId: req.user.id, status: "accepted" })
-      .populate("customerId", "name phone address municipality ward location")
+    const requests = await ServiceRequest.find({ provider: req.user.id, status: "accepted" })
+      .populate("customer", "fullName phone address municipality ward location")
       .sort({ createdAt: -1 });
 const response = requests.map(reqItem => {
       const [lon, lat] = sp.currentLocation.coordinates;
@@ -156,11 +156,11 @@ const response = requests.map(reqItem => {
       return {
         requestId: reqItem._id,
         service: reqItem.service,
-        customerName: reqItem.customerId?.name || "Unknown",
-        customerPhone: reqItem.customerId?.phone || "",
-        address: reqItem.customerId?.address || "",
-    municipality: reqItem.customerId?.municipality || "",
-    ward: reqItem.customerId?.ward || "",
+        customerName: reqItem.customer?.fullName || "Unknown",
+        customerPhone: reqItem.customer?.phone || "",
+        address: reqItem.customer?.address || "",
+    municipality: reqItem.customer?.municipality || "",
+    ward: reqItem.customer?.ward || "",
         distanceKm: parseFloat(getDistanceKm(lat, lon, custLat, custLon).toFixed(1)),
         requestedDate: reqItem.createdAt.toISOString().split("T")[0],
         status: reqItem.status,
@@ -182,10 +182,10 @@ const response = requests.map(reqItem => {
 router.get("/sp-requests/completed", spAuth, async (req, res) => {
   try {
     const requests = await ServiceRequest.find({
-      serviceProviderId: req.user.id,
+      provider: req.user.id,
       status: "completed"
     })
-      .populate("customerId", "name phone location")
+      .populate("customer", "fullName phone location")
       .sort({ createdAt: -1 });
 
     res.json(requests);
@@ -203,7 +203,7 @@ router.post("/sp-request-accept/:requestId", spAuth, requireLocation, async (req
     const { requestId } = req.params;
     console.log("sp: Accepting request", requestId);
 
-    const request = await ServiceRequest.findOne({ _id: requestId, serviceProviderId: req.user.id });
+    const request = await ServiceRequest.findOne({ _id: requestId, provider: req.user.id });
     if (!request) return res.status(404).json({ error: "Request not found" });
 
     request.status = "accepted";
@@ -211,7 +211,7 @@ router.post("/sp-request-accept/:requestId", spAuth, requireLocation, async (req
     console.log("sp: Request accepted", requestId);
     // 🔔 NOTIFY CUSTOMER
     const io = req.app.get("io");
-    io.to(request.customerId.toString()).emit("requestAccepted", {
+    io.to(request.customer.toString()).emit("requestAccepted", {
       requestId: request._id,
       spId: req.user.id,
       status: "accepted",
@@ -233,7 +233,7 @@ router.post("/sp-request-reject/:requestId", spAuth, requireLocation, async (req
     const { requestId } = req.params;
     console.log("sp: Rejecting request", requestId);
 
-    const request = await ServiceRequest.findOne({ _id: requestId, serviceProviderId: req.user.id });
+    const request = await ServiceRequest.findOne({ _id: requestId, provider: req.user.id });
     if (!request) return res.status(404).json({ error: "Request not found" });
 
     request.status = "rejected";
@@ -241,7 +241,7 @@ router.post("/sp-request-reject/:requestId", spAuth, requireLocation, async (req
     console.log("sp: Request rejected", requestId);
     // 🔔 NOTIFY CUSTOMER
     const io = req.app.get("io");
-    io.to(request.customerId.toString()).emit("requestRejected", {
+    io.to(request.customer.toString()).emit("requestRejected", {
       requestId: request._id,
       spId: req.user.id,
       status: "rejected",
@@ -263,7 +263,7 @@ router.post("/sp-request-complete/:requestId", spAuth, requireLocation, async (r
     const { requestId } = req.params;
     console.log("sp: Completing request", requestId);
 
-    const request = await ServiceRequest.findOne({ _id: requestId, serviceProviderId: req.user.id });
+    const request = await ServiceRequest.findOne({ _id: requestId, provider: req.user.id });
     if (!request) return res.status(404).json({ error: "Request not found" });
 
     request.status = "completed";
@@ -271,7 +271,7 @@ router.post("/sp-request-complete/:requestId", spAuth, requireLocation, async (r
     console.log("sp: Request completed", requestId);
     // 🔔 NOTIFY CUSTOMER
     const io = req.app.get("io");
-    io.to(request.customerId.toString()).emit("requestCompleted", {
+    io.to(request.customer.toString()).emit("requestCompleted", {
       requestId: request._id,
       spId: req.user.id,
       status: "completed",
@@ -423,7 +423,8 @@ router.post(
       // ---------------------------
       // Extract fields with flexibility
       // ---------------------------
-      const fullName = body["Full Name"];
+      
+      const fullName = body.fullName || body["Full Name"];
       const email = body["Email"];
       const phone = body["Phone"];
       const password = body["Password"];
@@ -439,7 +440,7 @@ router.post(
       const wardNo = body["Ward No"];
       const idType = body["ID type"] || body["ID Type"];
 
-      const profilePhoto = files["Profile Photo"]?.[0];
+     const profilePhoto = files.profilePhoto?.[0] || files["Profile Photo"]?.[0];
       const idDocument = files["Upload ID"]?.[0];
       const cvDocument = files["Upload CV"]?.[0];
       const portfolioFiles = files["Portfolio"] || [];
@@ -688,6 +689,7 @@ router.post(
         "Ward No": wardNo,
         "ID type": idType,
         cvDocument: cvPath,
+        role: "provider",
         Portfolio: portfolioPaths,
         "Extra Certificate": extraCertificatePaths,
         idDocument: idPath,
@@ -724,22 +726,22 @@ router.post("/sp-verify-otp", async (req, res) => {
     if (!Email || !OTP)
       return res.status(400).json({ error: "Email and OTP required" });
 
-    const user = await ServiceProvider.findOne({ email: Email });
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const sp = await ServiceProvider.findOne({ email: Email });
+    if (!sp) return res.status(404).json({ error: "User not found" });
 
-    if (user.isVerified)
+    if (sp.isVerified)
       return res.status(400).json({ error: "Account already verified" });
 
-    if (user.otp !== OTP)
+    if (sp.otp !== OTP)
       return res.status(400).json({ error: "Invalid OTP" });
 
-    if (user.otpExpires < new Date())
+    if (sp.otpExpires < new Date())
       return res.status(400).json({ error: "OTP expired" });
 
-    user.otp = null;
-    user.otpExpires = null;
-    user.isVerified = true;
-    await user.save();
+    sp.otp = null;
+    sp.otpExpires = null;
+    sp.isVerified = true;
+    await sp.save();
 
     res.json({ message: "OTP verified successfully" });
 
@@ -766,25 +768,25 @@ router.post("/sp-login", async (req, res) => {
         error: "Location is required to login. Please enable GPS."
       });
     }
-    const user = await ServiceProvider.findOne({ email: Email });
-    if (!user) return res.status(400).json({ error: "sp: Email not registered" });
-    if (!user.isVerified)
+    const sp = await ServiceProvider.findOne({ email: Email });
+    if (!sp) return res.status(400).json({ error: "sp: Email not registered" });
+    if (!sp.isVerified)
       return res.status(403).json({ error: "Email not verified" });
-    const isMatch = await bcrypt.compare(Password, user.password);
+    const isMatch = await bcrypt.compare(Password, sp.password);
     if (!isMatch) return res.status(400).json({ error: "sp: Invalid password" });
     // ✅ SAVE LOCATION DURING LOGIN
-    user.currentLocation = {
+    sp.currentLocation = {
       type: "Point",
       coordinates: [longitude, latitude]
     };
-
-    await user.save();
+      sp.isOnline = true;
+    await sp.save();
     // ✅ ADD ROLE HERE
     const token = jwt.sign(
       {
-        id: user._id,
-        email: user.email,
-        role: "service_provider"   // 👈 IMPORTANT
+        id: sp._id,
+        email: sp.email,
+        role: "provider"   // 👈 IMPORTANT
       },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN }
@@ -794,10 +796,10 @@ router.post("/sp-login", async (req, res) => {
       message: "Login successful",
       token,
       user: {
-        id: user._id,
-        FullName: user["Full Name"],
-        email: user.email,
-        role: "service_provider"
+        id: sp._id,
+        FullName: sp["Full Name"],
+        email: sp.email,
+        role: "provider"
       }
     });
   } catch (err) {
@@ -812,16 +814,23 @@ router.post("/sp-login", async (req, res) => {
 router.post("/sp-logout", spAuth, async (req, res) => {
   try {
     // 🔐 Role verification
-    if (req.user.role !== "service_provider") {
+    if (req.user.role !== "Provider") {
       return res.status(403).json({ error: "Unauthorized role" });
     }
 
     console.log("sp: Service Provider logged out:", req.user.id);
-
+    // ✅ Set SP offline in database
+    const sp = await ServiceProvider.findById(req.user.id);
+    if (sp) {
+      sp.isOnline = false;
+      sp.socketId = null; // optional: clear socket
+      await sp.save();
+      console.log("sp: Service Provider set offline:", req.user.id);
+    }
     // 🚫 JWT is stateless → frontend must delete it
     res.json({
       success: true,
-      role: "service_provider",
+      role: "provider",
       message: "Service Provider logged out successfully"
     });
 
@@ -836,10 +845,10 @@ router.post("/sp-logout", spAuth, async (req, res) => {
 // ---------------------------
 router.get("/sp-me", spAuth, async (req, res) => {
   try {
-    const user = await ServiceProvider.findById(req.user.id).select("-password -otp -otpExpires");
-    if (!user) return res.status(404).json({ error: "sp: User not found" });
-    console.log("sp: Profile fetched for", user.email);
-    res.json(user);
+    const sp = await ServiceProvider.findById(req.sp.id).select("-password -otp -otpExpires");
+    if (!sp) return res.status(404).json({ error: "sp: User not found" });
+    console.log("sp: Profile fetched for", sp.email);
+    res.json(sp);
   } catch (err) {
     console.error("sp: Profile error", err);
     res.status(500).json({ error: "sp: Server error", details: err.message });

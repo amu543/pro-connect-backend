@@ -1,8 +1,7 @@
-//models/sprating.js
-const mongoose = require('mongoose'); 
+const mongoose = require('mongoose');
 
 const ratingSchema = new mongoose.Schema({
-  serviceProviderId: { type: mongoose.Schema.Types.ObjectId, ref: 'ServiceProvider', required: true },
+  serviceProviderId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   rating: { type: Number, required: true, min: 1, max: 5 },
   review: { type: String },
