@@ -496,12 +496,31 @@ router.post(
       // ---------------------------
       // Parse skills
       // ---------------------------
-      const skills = typeof skillsRaw === "string"
-        ? (skillsRaw.startsWith("[") ? JSON.parse(skillsRaw) : skillsRaw.split(",").map(s => s.trim()))
-        : skillsRaw;
+       let skillsExpertise = [];
+      if (typeof skillsRaw === "string") {
+        if (skillsRaw.startsWith("[")) {
+          // JSON array
+          skillsExpertise = JSON.parse(skillsRaw).map(skill => ({
+            name: skill.name,
+            price: skill.price ?? null
+          }));
+        } else {
+          // Comma-separated string
+          skillsExpertise = skillsRaw.split(",").map(s => ({
+            name: s.trim(),
+            price: null
+          }));
+        }
+      } else if (Array.isArray(skillsRaw)) {
+        skillsExpertise = skillsRaw.map(skill => ({
+          name: skill.name,
+          price: skill.price ?? null
+        }));
+      }
 
-      if (!Array.isArray(skills) || skills.length === 0)
+      if (skillsExpertise.length === 0) {
         return res.status(400).json({ error: "sp: Skills/Expertise must be a non-empty array" });
+      }
 
       if (await ServiceProvider.findOne({ email }))
         return res.status(400).json({ error: "sp: Email already registered" });
@@ -673,25 +692,25 @@ router.post(
       // Save SP
       // ---------------------------
       const sp = new ServiceProvider({
-        "Full Name": fullName,
+        fullName,
         email,
         phone,
-        Sex: sex,
+        sex: sex,
         password: hashedPassword,
-        "Profile Photo": profilePath,
-        Service: service,
-        "Year of Experience": yearsOfExperience,
-        "Skills / Expertise": skills,
-        "Short Bio": shortBio,
-        Province: province,
-        District: district,
-        Municipality: municipality,
-        "Ward No": wardNo,
-        "ID type": idType,
+        profilePhoto: profilePath,
+        service: service,
+         yearsOfExperience,
+        skillsExpertise: skillsExpertise,
+         shortBio,
+        province: province,
+        district: district,
+        municipality: municipality,
+        wardNo: wardNo,
+        idType: idType,
         cvDocument: cvPath,
         role: "provider",
-        Portfolio: portfolioPaths,
-        "Extra Certificate": extraCertificatePaths,
+        portfolioFiles: portfolioPaths,
+        extraCertificates: extraCertificatePaths,
         idDocument: idPath,
         idTextOCR: ocrText,
         cvVerified,
