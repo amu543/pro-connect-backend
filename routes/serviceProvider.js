@@ -354,23 +354,28 @@ async function verifyCV(cvPath, fullName, service, skills, yearsOfExperience) {
     }
 
     // Skills check
-    skills.forEach(skill => {
-      if (cvText.includes(skill.toLowerCase())) {
-        cvVerificationDetails.skillsMatched.push(skill);
-      }
-    });
+    skills.forEach(skillObj => {
+  const skillName = skillObj.name; // get the string
+  if (typeof skillName === "string" && cvText.includes(skillName.toLowerCase())) {
+    cvVerificationDetails.skillsMatched.push(skillName);
+  }
+});
+
+
     if (cvVerificationDetails.skillsMatched.length === 0) {
       cvVerified = false;
     }
 
     // Experience check
-    const experienceStr = String(yearsOfExperience).toLowerCase();
-    if (cvText.includes(experienceStr)) {
-      cvVerificationDetails.experienceMatched = true;
-      cvVerificationDetails.extractedYears = Number(yearsOfExperience);
-    } else {
-      cvVerified = false;
-    }
+    const numbersInCV = cvText.match(/\d+/g)?.map(Number) || [];
+if (numbersInCV.some(n => n >= Number(yearsOfExperience))) {
+  cvVerificationDetails.experienceMatched = true;
+  cvVerificationDetails.extractedYears = Number(yearsOfExperience);
+} else {
+  cvVerificationDetails.experienceMatched = false;
+  cvVerified = false;
+}
+
 
   } catch (err) {
     console.error("CV verification error:", err);
@@ -676,7 +681,7 @@ router.post(
       // ---------------------------
       // CV Verification (Case-Insensitive)
       // ---------------------------
-      const { cvVerified, cvVerificationDetails } = await verifyCV(cvPath, fullName, service, skills, yearsOfExperience);
+      const { cvVerified, cvVerificationDetails } = await verifyCV(cvPath, fullName, service, skillsExpertise, yearsOfExperience);
       // ---------------------------
       // Hash password
       // ---------------------------
