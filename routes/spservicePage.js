@@ -37,7 +37,7 @@ const saveFile = (file, folder) => {
 router.get("/my-details", spAuth, async (req, res) => {
   try {
     const sp = await ServiceProvider.findById(req.user.id).select(
-      "fullName province district municipality wardNo Service skills address"
+      "fullName province district municipality wardNo service skillsExpertise shortBio address currentLocation"
     );
 
     if (!sp) {
@@ -45,19 +45,24 @@ router.get("/my-details", spAuth, async (req, res) => {
     }
 
     res.json({
-      name: sp.fullName,
-      service: sp.Service,
+      fullName: sp.fullName,
+      service: sp.service,
+      shortBio: sp.shortBio || "",
       address: {
-        address: sp.address || "",
-        municipality: sp.municipality || "",
-        ward: sp.wardNo || "",
-        district: sp.district || "",
-        province: sp.province || ""
+        
+         province: sp.homeLocation?.province || sp.province || "",
+        district: sp.homeLocation?.district || sp.district || "",
+        municipality: sp.homeLocation?.municipality || sp.municipality || "",
+        ward: sp.homeLocation?.ward || sp.wardNo || ""
       },
-      skills: sp.skills.map(skill => ({
+      skills: sp.skillsExpertise.map(skill => ({
         name: skill.name,
-        price: skill.price || null
-      }))
+        price: skill.price ?? null  // optional, show null if not provided
+      })),
+      currentLocation: {
+        type: sp.currentLocation.type,
+        coordinates: sp.currentLocation.coordinates
+      }
     });
 
   } catch (err) {

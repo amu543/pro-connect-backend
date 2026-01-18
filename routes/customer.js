@@ -21,7 +21,7 @@ const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString()
 
 const sendEmailOTP = async (email, otp) => {
   await transporter.sendMail({
-    from: process.env.SMTP_USER,
+    from: process.env.EMAIL_SERVICE_USER,
     to: email,
     subject: "Pro-Connect Email Verification",
     html: `<h2>Your OTP is: <b>${otp}</b></h2><p>Valid for 5 minutes</p>`
