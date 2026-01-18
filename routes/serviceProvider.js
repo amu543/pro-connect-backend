@@ -816,9 +816,10 @@ router.post("/sp-login", async (req, res) => {
       token,
       user: {
         id: sp._id,
-        FullName: sp["Full Name"],
+        FullName: sp.fullName,
         email: sp.email,
-        role: "provider"
+        role: "provider",
+        currentLocation: sp.currentLocation
       }
     });
   } catch (err) {
