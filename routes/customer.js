@@ -157,10 +157,21 @@ router.get("/me", customerAuth, async (req, res) => {
 router.put("/edit-profile", customerAuth, async (req, res) => {
   try {
     if (req.user.role !== "customer") return res.status(403).json({ msg: "Access denied" });
-    const { phone, profilePhoto } = req.body;
+    const { phone, profilePhoto,location } = req.body;
     const update = {};
     if (phone) update.phone = phone;
     if (profilePhoto) update.profilePhoto = profilePhoto;
+     // ✅ GeoJSON location handling
+    if (
+      location &&
+      typeof location.latitude === "number" &&
+      typeof location.longitude === "number"
+    ) {
+      update.location = {
+        type: "Point",
+        coordinates: [location.longitude, location.latitude]
+      };
+    }
     const updatedUser = await Customer.findByIdAndUpdate(req.user.id, update, { new: true }).select("-password -otp");
     res.json({ msg: "Profile updated successfully", user: updatedUser });
   } catch (err) {

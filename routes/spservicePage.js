@@ -7,6 +7,7 @@ const ServiceProvider = require("../models/ServiceProvider");
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
+const rating = require("../models/rating");
 
 // ---------------------------
 // Multer setup for profile updates
@@ -37,7 +38,7 @@ const saveFile = (file, folder) => {
 router.get("/my-details", spAuth, async (req, res) => {
   try {
     const sp = await ServiceProvider.findById(req.user.id).select(
-      "fullName province district municipality wardNo service skillsExpertise shortBio address currentLocation"
+      "fullName phone email profilePhoto yearsOfExperience rating totalRatings province district municipality wardNo service skillsExpertise shortBio address currentLocation"
     );
 
     if (!sp) {
@@ -46,6 +47,13 @@ router.get("/my-details", spAuth, async (req, res) => {
 
     res.json({
       fullName: sp.fullName,
+      phone: sp.phone,
+      email: sp.email,
+      photo: sp.profilePhoto|| "",
+      experience: sp.yearsOfExperience || "",
+      shortBio: sp.shortBio || "",
+      rating: sp.rating || 0,
+      totalRatings: sp.totalRatings || 0,
       service: sp.service,
       shortBio: sp.shortBio || "",
       address: {
