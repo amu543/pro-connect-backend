@@ -11,7 +11,7 @@ const serviceRequestSchema = new mongoose.Schema({
    required: true
 },
   service: { type: String, required: true },
-  status: { type: String, enum: ['pending', 'accepted', 'in_progress','rejected', 'completed'], default: 'pending' },
+  status: { type: String, enum: ['pending', 'accepted', 'in_progress','rejected', 'completed','customer-cancelled'], default: 'pending' },
   location: {
     type: { type: String, enum: ['Point'], default: 'Point' },
     coordinates: {

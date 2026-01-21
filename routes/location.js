@@ -26,6 +26,21 @@ router.post("/update", auth, async (req, res) => {
   }
 });
 console.log("before export — router type:", typeof router, "router keys:", Object.getOwnPropertyNames(router));
+
+//to fetch location for map 
+router.get("/my-location", auth, async (req, res) => {
+  const customer = await Customer.findById(req.user.id).select("location");
+
+  if (!customer || !customer.location) {
+    return res.status(404).json({ msg: "Location not found" });
+  }
+
+  res.json({
+    latitude: customer.location.coordinates[1],
+    longitude: customer.location.coordinates[0]
+  });
+});
+
 module.exports = router;
 module.exports.default = router; 
 // supports some interop cases

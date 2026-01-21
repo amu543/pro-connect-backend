@@ -77,7 +77,6 @@ safeMount("/api/service-providers", "./routes/serviceProvider");
 safeMount("/api/sp-service-page", "./routes/spservicePage");
 safeMount("/api/customer", "./routes/customer");
 safeMount("/api/customer/location", "./routes/location");
-safeMount("/api/distance", "./routes/distance");
 safeMount("/api/customer/request", "./routes/request");
 safeMount("/api/customer/rating", "./routes/rating");
 safeMount("/api/customer/customerDashboard", "./routes/customerDashboard");

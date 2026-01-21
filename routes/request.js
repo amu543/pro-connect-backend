@@ -6,24 +6,7 @@ const Notification = require("../models/notification");
 const ServiceProvider = require("../models/ServiceProvider");
 const customerAuth = require("../middleware/customerAuth"); 
 /* ============================
-   1. UPDATE CUSTOMER LOCATION
-============================ */
-router.post("/update-location", async (req, res) => {
-  try {
-    const { customerId, lat, lng } = req.body;
 
-    await Customer.findByIdAndUpdate(customerId, {
-      location: {
-        type: "Point",
-        coordinates: [lng, lat] // IMPORTANT ORDER
-      }
-    });
-
-    res.json({ msg: "Customer location updated" });
-  } catch (err) {
-    res.status(500).json({ msg: "Location update failed" });
-  }
-});
 /* ============================
    2. SELECT SERVICE
    → Notify ALL providers of that service
@@ -34,7 +17,7 @@ router.post("/select-service", async (req, res) => {
 
     const providers = await ServiceProvider.find({
       role: "provider",
-      serviceType
+      service: { $regex: new RegExp(`^${serviceType}$`, "i") },
     });
 
     const io = req.app.get("io");
@@ -188,5 +171,49 @@ router.get("/notifications/:customerId", async (req, res) => {
 
   res.json(notifications);
 });
+//cancel request
+router.post("/cancel/:requestId", customerAuth, async (req, res) => {
+  try {
+    const customerId = req.user.id;
+    const { requestId } = req.params;
 
+    const request = await ServiceRequest.findById(requestId);
+    if (!request) return res.status(404).json({ message: "Request not found" });
+
+    if (request.customer.toString() !== req.user.id.toString())
+      return res.status(403).json({ message: "Access denied: Not your request" });
+
+    if (!["pending", "in-progress","accepted"].includes(request.status))
+      return res.status(400).json({ message: `Cannot cancel a ${request.status} request` });
+
+    // ✅ Set status to customer-cancelled
+    request.status = "customer-cancelled";
+    request.cancelledAt = new Date();
+    await request.save();
+
+    res.json({ message: "Request cancelled successfully", requestId: request._id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server Error", error: err.message });
+  }
+});
+//rejected request move to reject page
+router.get("/rejected", customerAuth, async (req, res) => {
+  try {
+    const customerId = req.user.id;
+
+    // Fetch requests cancelled by customer
+    const cancelledRequests = await ServiceRequest.find({
+      customer: customerId,
+      status: "customer-cancelled",
+    })
+      .populate("provider", "fullName email phone") // provider info
+      .sort({ cancelledAt: -1 });
+
+    res.json({ count: cancelledRequests.length, requests: cancelledRequests });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server Error", error: err.message });
+  }
+});
 module.exports = router;
