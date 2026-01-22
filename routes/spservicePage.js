@@ -12,8 +12,29 @@ const rating = require("../models/rating");
 // ---------------------------
 // Multer setup for profile updates
 // ---------------------------
-const storage = multer.memoryStorage();
-const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } });
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const map = {
+      profilePhoto: "uploads/profile",
+      cvDocument: "uploads/cv",
+      extraCertificates: "uploads/certificates",
+      portfolio: "uploads/portfolio"
+    };
+
+    const folder = map[file.fieldname] || "uploads/others";
+    fs.mkdirSync(folder, { recursive: true });
+    cb(null, folder);
+  },
+  filename: (req, file, cb) => {
+    const cleanName = file.originalname.replace(/\s+/g, "_");
+    cb(null, Date.now() + "-" + cleanName);
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 }
+});
 
 // ---------------------------
 // Helper: Ensure folder exists
@@ -26,15 +47,9 @@ const ensureFolderExists = folderPath => {
 // Helper: Save uploaded file
 // ---------------------------
 const saveFile = (file, folder) => {
-  const uploadBaseDir = path.join(process.cwd(), "uploads");
-  const dir = path.join(uploadBaseDir, folder);
-  ensureFolderExists(dir);
-  const fileName = Date.now() + "-" + file.originalname.replace(/\s/g, "_");
-  const fullPath = path.join(dir, fileName);
-  fs.writeFileSync(fullPath, file.buffer);
-  return fullPath;
+  return file.path.replace(/\\/g, "/");
 };
-
+//get my profile details
 router.get("/my-details", spAuth, async (req, res) => {
   try {
     const sp = await ServiceProvider.findById(req.user.id).select(
@@ -44,12 +59,12 @@ router.get("/my-details", spAuth, async (req, res) => {
     if (!sp) {
       return res.status(404).json({ error: "Service provider not found" });
     }
-
+  console.log("PROFILE PHOTO PATH FROM DB:", sp.profilePhoto);
     res.json({
       fullName: sp.fullName,
       phone: sp.phone,
       email: sp.email,
-      photo: sp.profilePhoto|| "",
+       photo: sp.profilePhoto ? `/${sp.profilePhoto}` : "",
       experience: sp.yearsOfExperience || "",
       shortBio: sp.shortBio || "",
       rating: sp.rating || 0,
@@ -88,10 +103,10 @@ router.patch(
   "/update-profile",
   spAuth,
   upload.fields([
-    { name: "Profile Photo", maxCount: 1 },
-    { name: "Upload CV", maxCount: 1 },
-    { name: "Extra Certificate", maxCount: 5 },
-    { name: "Portfolio", maxCount: 5 },
+    { name: "profilePhoto", maxCount: 1 },
+    { name: "cvDocument", maxCount: 1 },
+    { name: "extraCertificates", maxCount: 5 },
+    { name: "portfolio", maxCount: 5 },
   ]),
   async (req, res) => {
     try {
@@ -129,12 +144,21 @@ router.patch(
       }
 
       // Update files
-      if (files["Profile Photo"]?.[0]) sp["Profile Photo"] = saveFile(files["Profile Photo"][0], "profile");
-      if (files["Upload CV"]?.[0]) sp.cvDocument = saveFile(files["Upload CV"][0], "cv");
-      if (files["Extra Certificate"]?.length > 0)
-        sp["Extra Certificate"] = files["Extra Certificate"].map(f => saveFile(f, "Extra Certificate"));
-      if (files["Portfolio"]?.length > 0) sp.Portfolio = files["Portfolio"].map(f => saveFile(f, "Portfolio"));
+     if (files.profilePhoto?.[0]) {
+        sp.profilePhoto = saveFile(files.profilePhoto[0]);
+      }
 
+      if (files.cvDocument?.[0]) {
+        sp.cvDocument = saveFile(files.cvDocument[0]);
+      }
+
+      if (files.extraCertificates?.length) {
+        sp.extraCertificates = files.extraCertificates.map(saveFile);
+      }
+
+      if (files.portfolio?.length) {
+        sp.portfolio = files.portfolio.map(saveFile);
+      }
       await sp.save();
       res.json({ message: "Profile updated successfully", user: sp });
     } catch (err) {

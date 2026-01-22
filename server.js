@@ -70,6 +70,10 @@ const Rating = require("./models/rating");
 const ServiceProvider = require("./models/ServiceProvider");
 
 // ---------------------------
+// Serve uploads folder statically
+// ---------------------------
+app.use("/uploads", express.static("uploads"));
+// ---------------------------
 // service provider Routes
 // ---------------------------
 // NEW (use safeMount)
@@ -80,10 +84,7 @@ safeMount("/api/customer/location", "./routes/location");
 safeMount("/api/customer/request", "./routes/request");
 safeMount("/api/customer/rating", "./routes/rating");
 safeMount("/api/customer/customerDashboard", "./routes/customerDashboard");
-// ---------------------------
-// Serve uploads folder statically
-// ---------------------------
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
 
 // ---------------------------
 // Root endpoint

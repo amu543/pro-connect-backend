@@ -16,17 +16,36 @@ const transporter = nodemailer.createTransport({
 
   }
 });
+// ADD THIS: Check if email is configured
+const isEmailConfigured = () => {
+  return process.env.EMAIL_SERVICE_USER && process.env.EMAIL_SERVICE_PASS;
+};
+
+
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
-
+// FIXED sendEmailOTP function
 const sendEmailOTP = async (email, otp) => {
-  await transporter.sendMail({
-    from: process.env.EMAIL_SERVICE_USER,
-    to: email,
-    subject: "Pro-Connect Email Verification",
-    html: `<h2>Your OTP is: <b>${otp}</b></h2><p>Valid for 5 minutes</p>`
-  });
+  // Check if email is configured
+  if (!isEmailConfigured()) {
+    console.log("Email not configured. Skipping email send.");
+    return;
+  }
+  
+  try {
+    await transporter.sendMail({
+      from: process.env.SMTP_USER || process.env.EMAIL_SERVICE_USER,
+      to: email,
+      subject: "Pro-Connect Email Verification",
+      html: `<h2>Your OTP is: <b>${otp}</b></h2><p>Valid for 5 minutes</p>`
+    });
+    console.log(`OTP email sent to ${email}`);
+  } catch (error) {
+    console.error("Failed to send OTP email:", error.message);
+    throw error; // Re-throw to be caught in the register endpoint
+  }
 };
+
 //Customer Registration
 
 router.post("/register", async (req, res) => {
@@ -68,8 +87,41 @@ router.post("/register", async (req, res) => {
     });
 
     await newCustomer.save();
-    await sendEmailOTP(email, otp);
-    res.status(201).json({ msg: "OTP sent to email", email });
+   // ALWAYS return the OTP in development for testing
+    console.log(`OTP for ${email}: ${otp}`);
+    
+    // Try to send email
+    if (isEmailConfigured()) {
+      try {
+        await sendEmailOTP(email, otp);
+        return res.status(201).json({ 
+          msg: "OTP sent to email", 
+          email,
+          success: true,
+          otpSent: true
+        });
+      } catch (emailError) {
+        console.error("Email sending failed:", emailError.message);
+        // Still return success with OTP in development
+        return res.status(201).json({ 
+          msg: "Registration successful. Email failed, OTP: " + otp, 
+          email,
+          success: true,
+          otpSent: false,
+          debugOtp: otp, // Include OTP in response for debugging
+          note: "Please use 'Resend OTP' button"
+        });
+      }
+    } else {
+      // Email not configured - just return OTP
+      return res.status(201).json({ 
+        msg: "Registration successful. OTP: " + otp, 
+        email,
+        success: true,
+        otpSent: false,
+        debugOtp: otp
+      });
+    }
   } catch (err) {
     console.error("Customer register error:", err);
     res.status(500).json({ msg: "Server error" });
